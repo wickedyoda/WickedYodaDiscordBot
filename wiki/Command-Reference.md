@@ -75,6 +75,18 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
   - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
 
+## `/logs`
+
+- Description: View recent lines from `container_errors.log`.
+- Parameters:
+  - `lines` (`int`, range `10-400`) - number of recent lines to return
+- Required user permissions: `Manage Messages`
+- Bot action:
+  - Reads latest lines from runtime error log file.
+  - Sends inline code block when short enough, otherwise sends as a file attachment.
+  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
+  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+
 ## `/help`
 
 - Description: Show a quick overview of bot capabilities and command groups.

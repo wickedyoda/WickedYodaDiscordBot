@@ -1,5 +1,6 @@
 import asyncio
 import http.client
+import io
 import json
 import logging
 import os
@@ -8,10 +9,10 @@ import sqlite3
 import tempfile
 import threading
 import urllib.parse
-import xml.etree.ElementTree as ET
 from datetime import UTC, datetime, timedelta
 
 import discord
+from defusedxml import ElementTree as DefusedET
 from discord import app_commands
 from discord.ext import commands
 
@@ -22,6 +23,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("wickedyoda-helper")
+bot_channel_logger = logging.getLogger("wickedyoda-helper.channel-log")
 
 
 def required_env(name: str) -> str:
@@ -94,6 +96,7 @@ COMMAND_PERMISSION_METADATA: dict[str, dict[str, str]] = {
     "shorten": {"label": "/shorten", "description": "Create short URL", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
     "expand": {"label": "/expand", "description": "Expand short URL", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
     "uptime": {"label": "/uptime", "description": "Uptime monitor summary", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
+    "logs": {"label": "/logs", "description": "Read recent error logs", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR},
     "help": {"label": "/help", "description": "Command overview", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
     "tags": {"label": "/tags", "description": "List configured tags", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
     "tag": {"label": "/tag", "description": "Post a configured tag", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
@@ -466,8 +469,8 @@ def fetch_latest_youtube_video(channel_id: str) -> dict:
         raise RuntimeError(f"YouTube feed returned HTTP {status}.")
 
     try:
-        root = ET.fromstring(body_text)
-    except ET.ParseError as exc:
+        root = DefusedET.fromstring(body_text)
+    except DefusedET.ParseError as exc:
         raise RuntimeError("YouTube feed returned invalid XML.") from exc
 
     ns = {
@@ -679,6 +682,76 @@ def resolve_action_db_path() -> str:
             logger.warning("Unable to use action DB path %s: %s", path, exc)
 
     raise RuntimeError("No writable SQLite database path found for moderation action store.")
+
+
+def parse_log_level(value: str, default: int = logging.INFO) -> int:
+    level_name = (value or "").strip().upper()
+    if not level_name:
+        return default
+    return getattr(logging, level_name, default)
+
+
+def resolve_log_dir(db_path: str) -> str:
+    configured = os.getenv("LOG_DIR", "").strip()
+    preferred = configured or os.path.dirname(db_path) or "."
+    fallback = os.path.dirname(db_path) or "."
+    candidates: list[str] = [preferred]
+    if fallback != preferred:
+        candidates.append(fallback)
+
+    for candidate in candidates:
+        try:
+            os.makedirs(candidate, exist_ok=True)
+            test_path = os.path.join(candidate, ".wickedyoda-log-write-test")
+            with open(test_path, "a", encoding="utf-8"):
+                pass
+            os.remove(test_path)
+            return candidate
+        except OSError as exc:
+            logger.warning("Unable to use LOG_DIR %s: %s", candidate, exc)
+    raise RuntimeError("No writable log directory available.")
+
+
+def add_file_handler(target_logger: logging.Logger, path: str, level: int) -> None:
+    normalized = os.path.abspath(path)
+    for handler in target_logger.handlers:
+        if isinstance(handler, logging.FileHandler) and os.path.abspath(handler.baseFilename) == normalized:
+            handler.setLevel(level)
+            return
+    file_handler = logging.FileHandler(path, encoding="utf-8")
+    file_handler.setLevel(level)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    target_logger.addHandler(file_handler)
+
+
+def configure_runtime_logging(log_dir: str) -> tuple[str, str, str]:
+    log_level = parse_log_level(os.getenv("LOG_LEVEL", "INFO"), default=logging.INFO)
+    container_log_level = parse_log_level(os.getenv("CONTAINER_LOG_LEVEL", "WARNING"), default=logging.WARNING)
+    discord_log_level = parse_log_level(os.getenv("DISCORD_LOG_LEVEL", "WARNING"), default=logging.WARNING)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(min(log_level, container_log_level, discord_log_level))
+    logger.setLevel(log_level)
+    bot_channel_logger.setLevel(logging.INFO)
+    logging.getLogger("discord").setLevel(discord_log_level)
+    logging.getLogger("werkzeug").setLevel(discord_log_level)
+
+    bot_log_file = os.path.join(log_dir, "bot.log")
+    channel_log_file = os.path.join(log_dir, "bot_log.log")
+    error_log_file = os.path.join(log_dir, "container_errors.log")
+
+    add_file_handler(logger, bot_log_file, log_level)
+    add_file_handler(bot_channel_logger, channel_log_file, logging.INFO)
+    add_file_handler(root_logger, error_log_file, container_log_level)
+    return bot_log_file, channel_log_file, error_log_file
+
+
+def read_recent_log_lines(path: str, lines: int) -> str:
+    if not os.path.exists(path) or not os.path.isfile(path):
+        return ""
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        content = handle.readlines()
+    return "".join(content[-max(1, lines) :]).strip()
 
 
 class ActionStore:
@@ -906,6 +979,9 @@ class ActionStore:
 
 
 ACTION_DB_PATH = resolve_action_db_path()
+ACTIONS_DIR = os.path.dirname(ACTION_DB_PATH) or "."
+LOG_DIR = resolve_log_dir(ACTION_DB_PATH)
+BOT_LOG_FILE, BOT_CHANNEL_LOG_FILE, CONTAINER_ERROR_LOG_FILE = configure_runtime_logging(LOG_DIR)
 ACTION_STORE = ActionStore(ACTION_DB_PATH)
 
 
@@ -1311,6 +1387,7 @@ async def get_log_channel(client: commands.Bot) -> discord.TextChannel | None:
 
 async def log_action(client: commands.Bot, title: str, description: str, color: discord.Color) -> None:
     try:
+        bot_channel_logger.info("%s | %s", title, description.replace("\n", " | "))
         channel = await get_log_channel(client)
         if channel is None:
             logger.error("Bot_Log_Channel %s not found or not a text channel.", BOT_LOG_CHANNEL)
@@ -1520,6 +1597,38 @@ async def uptime(interaction: discord.Interaction) -> None:
         await log_interaction(interaction, action="uptime", reason=truncate_log_text(str(exc)), success=False)
 
 
+@bot.tree.command(name="logs", description="View recent container error logs.", guild=discord.Object(id=GUILD_ID))
+@app_commands.checks.has_permissions(manage_messages=True)
+@app_commands.describe(lines="Number of recent lines to show (10-400)")
+async def logs(interaction: discord.Interaction, lines: app_commands.Range[int, 10, 400] = 120) -> None:
+    if not await ensure_interaction_command_access(interaction, "logs"):
+        return
+
+    log_tail = read_recent_log_lines(CONTAINER_ERROR_LOG_FILE, int(lines))
+    if not log_tail:
+        await reply_ephemeral(interaction, "No container error logs have been written yet.")
+        await log_interaction(interaction, action="logs", reason="no logs available", success=False)
+        return
+
+    response_header = f"Showing last `{int(lines)}` lines from `{os.path.basename(CONTAINER_ERROR_LOG_FILE)}`."
+    if len(log_tail) <= 1700:
+        await reply_ephemeral(interaction, f"{response_header}\n```log\n{log_tail}\n```")
+    else:
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                response_header,
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+                file=discord.File(io.BytesIO(log_tail.encode("utf-8")), filename=f"container_errors_last_{int(lines)}.log"),
+            )
+        else:
+            await interaction.response.send_message(
+                response_header,
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+                file=discord.File(io.BytesIO(log_tail.encode("utf-8")), filename=f"container_errors_last_{int(lines)}.log"),
+            )
+    await log_interaction(interaction, action="logs", reason=f"lines={int(lines)}", success=True)
+
+
 @bot.tree.command(name="help", description="Show available bot features.", guild=discord.Object(id=GUILD_ID))
 async def help_command(interaction: discord.Interaction) -> None:
     if not await ensure_interaction_command_access(interaction, "help"):
@@ -1527,7 +1636,7 @@ async def help_command(interaction: discord.Interaction) -> None:
     message = (
         "**WickedYoda's Little Helper**\n"
         "General: `/ping`, `/sayhi`, `/happy`, `/help`\n"
-        "Utilities: `/shorten`, `/expand`, `/uptime`\n"
+        "Utilities: `/shorten`, `/expand`, `/uptime`, `/logs`\n"
         "Tags: `/tags`, `/tag <name>`, message tags like `!rules`\n"
         "Moderation: `/kick`, `/ban`, `/timeout`, `/untimeout`, `/purge`, `/unban`, `/addrole`, `/removerole`\n"
         "Use the web admin panel for settings, users, logs, wiki, command permissions, and tag responses."
@@ -1794,6 +1903,7 @@ async def removerole(
 @timeout.error
 @untimeout.error
 @purge.error
+@logs.error
 @unban.error
 @addrole.error
 @removerole.error

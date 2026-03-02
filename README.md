@@ -57,6 +57,7 @@ Set these in `env.env`:
 - `/shorten`
 - `/expand`
 - `/uptime`
+- `/logs`
 - `/kick`
 - `/ban`
 - `/timeout`
