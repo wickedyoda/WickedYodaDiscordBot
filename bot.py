@@ -445,14 +445,27 @@ class ModerationBot(commands.Bot):
         super().__init__(command_prefix=commands.when_mentioned, intents=intents)
         self.guild_object = discord.Object(id=GUILD_ID)
         self.commands_synced = 0
+        self.expected_commands = 0
         self.started_at = datetime.now(UTC)
         self.web_thread: threading.Thread | None = None
 
-    async def setup_hook(self) -> None:
-        self.tree.copy_global_to(guild=self.guild_object)
+    async def sync_guild_commands(self, reason: str) -> None:
+        expected = len(self.tree.get_commands(guild=self.guild_object))
         synced = await self.tree.sync(guild=self.guild_object)
         self.commands_synced = len(synced)
-        logger.info("Synced %s command(s) to guild %s", self.commands_synced, GUILD_ID)
+        self.expected_commands = expected
+        synced_names = ", ".join(f"/{command.name}" for command in synced)
+        logger.info(
+            "Synced %s/%s command(s) to guild %s (%s): %s",
+            self.commands_synced,
+            self.expected_commands,
+            GUILD_ID,
+            reason,
+            synced_names or "(none)",
+        )
+
+    async def setup_hook(self) -> None:
+        await self.sync_guild_commands(reason="startup")
         if WEB_ENABLED and self.web_thread is None:
             self.web_thread = start_web_admin(
                 db_path=ACTION_DB_PATH,
@@ -464,6 +477,13 @@ class ModerationBot(commands.Bot):
 
     async def on_ready(self) -> None:
         logger.info("Logged in as %s (%s)", self.user, self.user.id if self.user else "n/a")
+        if self.commands_synced < self.expected_commands:
+            logger.warning(
+                "Guild command sync appears incomplete (%s/%s). Retrying sync once.",
+                self.commands_synced,
+                self.expected_commands,
+            )
+            await self.sync_guild_commands(reason="ready-retry")
         if not ENABLE_MEMBERS_INTENT:
             logger.info("ENABLE_MEMBERS_INTENT is disabled; no privileged members intent requested.")
         await log_action(
