@@ -12,6 +12,7 @@ Set these in `env.env`:
 - `WEB_ENABLED` - enable web GUI (`true`/`false`)
 - `WEB_BIND_HOST` - web server bind host (use `0.0.0.0` in Docker)
 - `WEB_PORT` - web GUI port inside container
+- `ENABLE_MEMBERS_INTENT` - set `true` only if you enabled Server Members Intent in Discord Developer Portal
 - `WEB_ADMIN_DEFAULT_USERNAME` - web admin login username
 - `WEB_ADMIN_DEFAULT_PASSWORD` - web admin login password
 - `WEB_ADMIN_DEFAULT_PASSWORD_HASH` - optional password hash instead of plaintext password

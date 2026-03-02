@@ -50,10 +50,11 @@ DATA_DIR = os.getenv("DATA_DIR", "/app/data")
 WEB_ENABLED = env_bool("WEB_ENABLED", True)
 WEB_BIND_HOST = os.getenv("WEB_BIND_HOST", "127.0.0.1")
 WEB_PORT = env_int("WEB_PORT", 8080)
+ENABLE_MEMBERS_INTENT = env_bool("ENABLE_MEMBERS_INTENT", False)
 
 intents = discord.Intents.default()
 intents.guilds = True
-intents.members = True
+intents.members = ENABLE_MEMBERS_INTENT
 intents.messages = True
 intents.message_content = False
 
@@ -149,7 +150,7 @@ ACTION_STORE = ActionStore(ACTION_DB_PATH)
 
 class ModerationBot(commands.Bot):
     def __init__(self) -> None:
-        super().__init__(command_prefix="!", intents=intents)
+        super().__init__(command_prefix=commands.when_mentioned, intents=intents)
         self.guild_object = discord.Object(id=GUILD_ID)
         self.commands_synced = 0
         self.started_at = datetime.now(UTC)
@@ -171,6 +172,8 @@ class ModerationBot(commands.Bot):
 
     async def on_ready(self) -> None:
         logger.info("Logged in as %s (%s)", self.user, self.user.id if self.user else "n/a")
+        if not ENABLE_MEMBERS_INTENT:
+            logger.info("ENABLE_MEMBERS_INTENT is disabled; no privileged members intent requested.")
         await log_action(
             self,
             "Bot Started",
