@@ -1,3 +1,4 @@
+import json
 import os
 import secrets
 import sqlite3
@@ -452,6 +453,8 @@ PAGE_TEMPLATE = """
           <li class="nav-item"><a class="nav-link" href="{{ url_for('wiki') }}">Wiki</a></li>
           {% if session.get("is_admin") %}
           <li class="nav-item"><a class="nav-link" href="{{ url_for('users') }}">Users</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('command_permissions') }}">Command Permissions</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('tag_responses') }}">Tag Responses</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('settings') }}">Settings</a></li>
           {% endif %}
           <li class="nav-item"><a class="nav-link" href="{{ url_for('account') }}">Account</a></li>
@@ -686,6 +689,59 @@ PAGE_TEMPLATE = """
       <div class="card card-soft p-3">
         <pre class="small mb-0" style="white-space: pre-wrap;">{{ wiki_content }}</pre>
       </div>
+    {% elif page == "command_permissions" %}
+      <div class="card card-soft p-3">
+        <h1 class="h5 mb-3">Command Permissions</h1>
+        <p class="small text-secondary">Set command access mode. Use custom role IDs for granular control.</p>
+        <form method="post" action="{{ url_for('command_permissions') }}">
+          <div class="table-wrap">
+            <table class="table table-sm align-middle">
+              <thead><tr><th>Command</th><th>Default</th><th>Mode</th><th>Custom Role IDs</th></tr></thead>
+              <tbody>
+                {% for item in command_permissions.commands %}
+                <tr>
+                  <td class="small">
+                    <div class="fw-semibold">{{ item.label }}</div>
+                    <div class="text-secondary">{{ item.description }}</div>
+                    <input type="hidden" name="command_key" value="{{ item.key }}">
+                  </td>
+                  <td class="small">{{ item.default_policy_label }}</td>
+                  <td>
+                    <select class="form-select" name="mode__{{ item.key }}">
+                      <option value="default" {% if item.mode == "default" %}selected{% endif %}>Default</option>
+                      <option value="public" {% if item.mode == "public" %}selected{% endif %}>Public</option>
+                      <option value="custom_roles" {% if item.mode == "custom_roles" %}selected{% endif %}>Custom roles</option>
+                    </select>
+                  </td>
+                  <td>
+                    {% if role_options %}
+                    <select class="form-select mb-2" name="role_ids__{{ item.key }}" multiple size="5">
+                      {% for role in role_options %}
+                      <option value="{{ role.id }}" {% if role.id|string in item.role_id_strings %}selected{% endif %}>{{ role.name }} ({{ role.id }})</option>
+                      {% endfor %}
+                    </select>
+                    {% endif %}
+                    <input class="form-control" name="role_ids_text__{{ item.key }}" value="{{ item.role_ids_csv }}" placeholder="Comma-separated role IDs">
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <button class="btn btn-primary" type="submit">Save Command Permissions</button>
+        </form>
+      </div>
+    {% elif page == "tag_responses" %}
+      <div class="card card-soft p-3">
+        <h1 class="h5 mb-3">Tag Responses</h1>
+        <p class="small text-secondary">Edit JSON mapping used by `/tag`, `/tags`, and `!tag` message shortcuts.</p>
+        <form method="post" action="{{ url_for('tag_responses') }}">
+          <div class="mb-3">
+            <textarea class="form-control font-monospace" rows="18" name="tag_json">{{ tag_json }}</textarea>
+          </div>
+          <button class="btn btn-primary" type="submit">Save Tag Responses</button>
+        </form>
+      </div>
     {% elif page == "users" %}
       <div class="card card-soft p-3 mb-3">
         <h1 class="h5 mb-3">Users</h1>
@@ -796,6 +852,11 @@ def create_app(
     db_path: str,
     get_bot_snapshot: Callable[[], dict],
     get_notification_channels: Callable[[], list[dict]] | None = None,
+    get_discord_catalog: Callable[[], dict] | None = None,
+    get_command_permissions: Callable[[], dict] | None = None,
+    save_command_permissions: Callable[[dict, str], dict] | None = None,
+    get_tag_responses: Callable[[], dict] | None = None,
+    save_tag_responses: Callable[[dict, str], dict] | None = None,
     resolve_youtube_subscription: Callable[[str], dict] | None = None,
 ) -> Flask:
     app = Flask(__name__)
@@ -1028,6 +1089,103 @@ def create_app(
             github_wiki_url=os.getenv("WEB_GITHUB_WIKI_URL", "").strip(),
         )
 
+    @app.route("/admin/command-permissions", methods=["GET", "POST"])
+    @admin_required
+    def command_permissions():
+        permissions_payload = (
+            get_command_permissions()
+            if callable(get_command_permissions)
+            else {"ok": False, "error": "Command permissions callback not configured."}
+        )
+        catalog_payload = get_discord_catalog() if callable(get_discord_catalog) else {}
+        role_options = []
+        if isinstance(catalog_payload, dict) and catalog_payload.get("ok"):
+            role_options = catalog_payload.get("roles", []) or []
+
+        if request.method == "POST":
+            if not callable(save_command_permissions):
+                flash("Command permissions save callback is not configured.", "danger")
+            else:
+                command_updates: dict[str, dict] = {}
+                for command_key in request.form.getlist("command_key"):
+                    command_updates[command_key] = {
+                        "mode": request.form.get(f"mode__{command_key}", "default"),
+                        "role_ids": request.form.getlist(f"role_ids__{command_key}")
+                        or request.form.get(f"role_ids_text__{command_key}", ""),
+                    }
+                save_result = save_command_permissions(command_updates and {"commands": command_updates}, str(session.get("user", "")))
+                if not isinstance(save_result, dict):
+                    flash("Invalid response from command permission save handler.", "danger")
+                elif not save_result.get("ok"):
+                    flash(str(save_result.get("error", "Failed to update command permissions.")), "danger")
+                else:
+                    permissions_payload = save_result
+                    flash(str(save_result.get("message", "Command permissions updated.")), "success")
+
+        if not isinstance(permissions_payload, dict) or not permissions_payload.get("ok"):
+            flash(
+                str(permissions_payload.get("error", "Could not load command permissions."))
+                if isinstance(permissions_payload, dict)
+                else "Could not load command permissions.",
+                "danger",
+            )
+            permissions_payload = {"ok": True, "commands": []}
+
+        commands = permissions_payload.get("commands", []) or []
+        for item in commands:
+            role_ids = item.get("role_ids", []) or []
+            role_id_strings = [str(value) for value in role_ids]
+            item["role_id_strings"] = role_id_strings
+            item["role_ids_csv"] = ",".join(role_id_strings)
+
+        return render_template_string(
+            PAGE_TEMPLATE,
+            page="command_permissions",
+            title="Web Admin Command Permissions",
+            command_permissions=permissions_payload,
+            role_options=role_options,
+        )
+
+    @app.route("/admin/tag-responses", methods=["GET", "POST"])
+    @admin_required
+    def tag_responses():
+        if request.method == "POST":
+            raw_json = request.form.get("tag_json", "")
+            try:
+                payload = json.loads(raw_json)
+                if not isinstance(payload, dict):
+                    raise ValueError("Tag response JSON must be an object.")
+                if not callable(save_tag_responses):
+                    raise ValueError("Tag response save callback is not configured.")
+                result = save_tag_responses(payload, str(session.get("user", "")))
+                if not isinstance(result, dict) or not result.get("ok"):
+                    raise ValueError(
+                        str(result.get("error", "Failed to save tag responses.")) if isinstance(result, dict) else "Invalid save response."
+                    )
+                flash(str(result.get("message", "Tag responses updated.")), "success")
+            except Exception as exc:
+                flash(f"Invalid tag JSON: {exc}", "danger")
+
+        mapping: dict[str, str] = {}
+        if callable(get_tag_responses):
+            response = get_tag_responses()
+            if isinstance(response, dict) and response.get("ok"):
+                mapping = response.get("mapping", {}) or {}
+            else:
+                flash(
+                    str(response.get("error", "Failed to load tag responses."))
+                    if isinstance(response, dict)
+                    else "Failed to load tag responses.",
+                    "danger",
+                )
+        tag_json = json.dumps(mapping, indent=2, sort_keys=True)
+        return render_template_string(
+            PAGE_TEMPLATE,
+            page="tag_responses",
+            title="Web Admin Tag Responses",
+            tag_json=tag_json,
+        )
+
     @app.get("/admin/users")
     @admin_required
     def users():
@@ -1164,6 +1322,11 @@ def start_web_admin(
     db_path: str,
     get_bot_snapshot: Callable[[], dict],
     get_notification_channels: Callable[[], list[dict]] | None,
+    get_discord_catalog: Callable[[], dict] | None,
+    get_command_permissions: Callable[[], dict] | None,
+    save_command_permissions: Callable[[dict, str], dict] | None,
+    get_tag_responses: Callable[[], dict] | None,
+    save_tag_responses: Callable[[dict, str], dict] | None,
     resolve_youtube_subscription: Callable[[str], dict] | None,
     host: str,
     port: int,
@@ -1172,6 +1335,11 @@ def start_web_admin(
         db_path,
         get_bot_snapshot,
         get_notification_channels=get_notification_channels,
+        get_discord_catalog=get_discord_catalog,
+        get_command_permissions=get_command_permissions,
+        save_command_permissions=save_command_permissions,
+        get_tag_responses=get_tag_responses,
+        save_tag_responses=save_tag_responses,
         resolve_youtube_subscription=resolve_youtube_subscription,
     )
 

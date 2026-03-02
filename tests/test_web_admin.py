@@ -173,3 +173,51 @@ def test_logs_and_wiki_pages_render(tmp_path: Path, monkeypatch) -> None:
     assert b"Logs" in logs_response.data
     assert wiki_response.status_code == 200
     assert b"Command-Reference.md" in wiki_response.data
+
+
+def test_command_permissions_and_tag_pages_render(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+
+    def get_command_permissions() -> dict:
+        return {
+            "ok": True,
+            "commands": [
+                {
+                    "key": "ping",
+                    "label": "/ping",
+                    "description": "Health check",
+                    "default_policy_label": "Public (all members)",
+                    "mode": "default",
+                    "role_ids": [],
+                }
+            ],
+        }
+
+    def save_command_permissions(_payload: dict, _email: str) -> dict:
+        return get_command_permissions() | {"message": "updated"}
+
+    def get_tag_responses() -> dict:
+        return {"ok": True, "mapping": {"!support": "Need help?"}}
+
+    def save_tag_responses(mapping: dict, _email: str) -> dict:
+        return {"ok": True, "mapping": mapping, "message": "updated"}
+
+    app = create_app(
+        str(tmp_path / "actions.db"),
+        _bot_snapshot,
+        get_command_permissions=get_command_permissions,
+        save_command_permissions=save_command_permissions,
+        get_tag_responses=get_tag_responses,
+        save_tag_responses=save_tag_responses,
+    )
+    client = app.test_client()
+    client.post("/login", data={"username": "admin@example.com", "password": "TestPass123!"}, follow_redirects=True)
+
+    permissions_response = client.get("/admin/command-permissions")
+    tags_response = client.get("/admin/tag-responses")
+
+    assert permissions_response.status_code == 200
+    assert b"Command Permissions" in permissions_response.data
+    assert tags_response.status_code == 200
+    assert b"Tag Responses" in tags_response.data

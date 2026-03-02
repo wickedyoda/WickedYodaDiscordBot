@@ -75,6 +75,39 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
   - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
 
+## `/help`
+
+- Description: Show a quick overview of bot capabilities and command groups.
+- Parameters: none
+- Required user permissions: none
+- Bot action:
+  - Sends a quick reference summary.
+  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
+  - Logs action to `Bot_Log_Channel` and SQLite.
+
+## `/tags`
+
+- Description: List configured tag shortcuts.
+- Parameters: none
+- Required user permissions: none (unless overridden by command permissions policy)
+- Bot action:
+  - Lists currently configured tag keys.
+  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
+  - Logs action to `Bot_Log_Channel` and SQLite.
+
+## `/tag`
+
+- Description: Post the configured response for a specific tag.
+- Parameters:
+  - `name` (`str`) - tag key (with or without `!`)
+- Required user permissions: none (unless overridden by command permissions policy)
+- Bot action:
+  - Sends configured tag response if found.
+  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
+  - Logs success/failure to `Bot_Log_Channel` and SQLite.
+
+Message tags are also supported for `!tag` style messages when message content intent is available.
+
 ## `/kick`
 
 - Description: Kick a member from the server.
@@ -135,6 +168,46 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
 - Bot action:
   - Validates command is run in a channel context.
   - Defers response, purges messages, sends ephemeral count deleted.
+  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+
+## `/unban`
+
+- Description: Unban a user by Discord user ID.
+- Parameters:
+  - `user_id` (`str`) - target user ID
+  - `reason` (`str`, optional)
+- Required user permissions: `Ban Members`
+- Bot action:
+  - Attempts unban by ID.
+  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
+  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+
+## `/addrole`
+
+- Description: Add a role to a member.
+- Parameters:
+  - `member` (`discord.Member`) - member to update
+  - `role` (`discord.Role`) - role to add
+  - `reason` (`str`, optional)
+- Required user permissions: `Manage Roles`
+- Bot action:
+  - Validates member/role hierarchy constraints.
+  - Adds role on success.
+  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
+  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+
+## `/removerole`
+
+- Description: Remove a role from a member.
+- Parameters:
+  - `member` (`discord.Member`) - member to update
+  - `role` (`discord.Role`) - role to remove
+  - `reason` (`str`, optional)
+- Required user permissions: `Manage Roles`
+- Bot action:
+  - Validates member/role hierarchy constraints.
+  - Removes role on success.
+  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
   - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
 
 ## Shared Error Behavior
