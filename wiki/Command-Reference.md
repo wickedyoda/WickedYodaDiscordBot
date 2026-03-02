@@ -13,6 +13,15 @@ Guild-scoped slash commands currently registered in `bot.py`.
   - Replies with `WickedYoda's Little Helper is online.` (ephemeral).
   - Logs success to `Bot_Log_Channel` and SQLite action history.
 
+## `/sayhi`
+
+- Description: Introduce the bot in the current channel.
+- Parameters: none
+- Required user permissions: none
+- Bot action:
+  - Posts a public introduction message in the channel.
+  - Logs success to `Bot_Log_Channel` and SQLite action history.
+
 ## `/shorten`
 
 - Description: Create a short URL with the configured Shortipy instance.

@@ -88,9 +88,7 @@ def normalize_status_page_url(raw_url: str) -> str:
 
 SHORTENER_BASE_URL = normalize_shortener_base_url(os.getenv("SHORTENER_BASE_URL", "https://l.twy4.us"))
 SHORTENER_HOST = urllib.parse.urlparse(SHORTENER_BASE_URL).netloc.lower()
-UPTIME_STATUS_PAGE_URL = normalize_status_page_url(
-    os.getenv("UPTIME_STATUS_PAGE_URL", "https://randy.wickedyoda.com/status/everything")
-)
+UPTIME_STATUS_PAGE_URL = normalize_status_page_url(os.getenv("UPTIME_STATUS_PAGE_URL", "https://randy.wickedyoda.com/status/everything"))
 UPTIME_STATUS_PAGE_PARSED = urllib.parse.urlparse(UPTIME_STATUS_PAGE_URL)
 uptime_slug_match = STATUS_PAGE_PATH_REGEX.match(UPTIME_STATUS_PAGE_PARSED.path)
 if uptime_slug_match is None:
@@ -603,6 +601,13 @@ async def ping(interaction: discord.Interaction) -> None:
     await log_interaction(interaction, action="ping", success=True)
 
 
+@bot.tree.command(name="sayhi", description="Introduce the bot in the channel.", guild=discord.Object(id=GUILD_ID))
+async def sayhi(interaction: discord.Interaction) -> None:
+    intro = "Hi everyone, I am WickedYoda's Little Helper.\nI can help with moderation, URL short links, and uptime checks."
+    await interaction.response.send_message(intro)
+    await log_interaction(interaction, action="sayhi", reason="Posted channel introduction", success=True)
+
+
 @bot.tree.command(name="shorten", description="Create a short URL.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(url="URL to shorten using the configured shortener")
 async def shorten(interaction: discord.Interaction, url: str) -> None:
@@ -679,9 +684,7 @@ async def uptime(interaction: discord.Interaction) -> None:
         await log_interaction(
             interaction,
             action="uptime",
-            reason=truncate_log_text(
-                f"up={counts.get('up', 0)} down={counts.get('down', 0)} pending={counts.get('pending', 0)}"
-            ),
+            reason=truncate_log_text(f"up={counts.get('up', 0)} down={counts.get('down', 0)} pending={counts.get('pending', 0)}"),
             success=True,
         )
     except RuntimeError as exc:

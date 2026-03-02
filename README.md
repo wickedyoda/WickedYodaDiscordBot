@@ -40,6 +40,7 @@ Set these in `env.env`:
 ## Included Slash Commands
 
 - `/ping`
+- `/sayhi`
 - `/shorten`
 - `/expand`
 - `/uptime`
