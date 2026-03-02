@@ -356,10 +356,28 @@ def _resolve_log_directory(db_path: str) -> Path:
     return Path(db_path).resolve().parent
 
 
-def _tail_file(path: Path, line_limit: int = 400) -> str:
-    if not path.exists() or not path.is_file():
-        return f"Log file not found: {path}"
-    with path.open("r", encoding="utf-8", errors="replace") as handle:
+def _resolve_safe_child_path(base_dir: Path, name: str) -> Path | None:
+    candidate_name = Path(name.strip()).name
+    if not candidate_name or candidate_name in {".", ".."}:
+        return None
+    base_dir_resolved = base_dir.resolve()
+    candidate = (base_dir_resolved / candidate_name).resolve()
+    try:
+        candidate.relative_to(base_dir_resolved)
+    except ValueError:
+        return None
+    return candidate
+
+
+def _tail_file(base_dir: Path, name: str, line_limit: int = 400) -> str:
+    safe_path = _resolve_safe_child_path(base_dir, name)
+    if safe_path is None:
+        return "Invalid log file path."
+    if safe_path.suffix.lower() != ".log":
+        return "Invalid log file selection."
+    if not safe_path.exists() or not safe_path.is_file():
+        return f"Log file not found: {safe_path.name}"
+    with safe_path.open("r", encoding="utf-8", errors="replace") as handle:
         lines = handle.readlines()
     if not lines:
         return "(empty log file)"
@@ -669,7 +687,7 @@ PAGE_TEMPLATE = """
           </select>
           {% if guild_options %}
           <form method="post" action="{{ url_for('select_guild') }}" class="d-flex">
-            <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+            <input type="hidden" name="next_endpoint" value="{{ request.endpoint or 'dashboard' }}">
             <select class="form-select form-select-sm" name="guild_id" onchange="this.form.submit()">
               {% for guild in guild_options %}
               <option value="{{ guild.id }}" {% if selected_guild_id == guild.id %}selected{% endif %}>{{ guild.name }}</option>
@@ -2116,9 +2134,31 @@ def create_app(
             flash("No managed guilds available.", "warning")
         else:
             flash("Guild context updated.", "success")
-        next_path = request.form.get("next", "").strip()
-        if next_path.startswith("/") and not next_path.startswith("//"):
-            return redirect(next_path)
+
+        next_endpoint = request.form.get("next_endpoint", "").strip()
+        login_allowed_endpoints = {
+            "dashboard",
+            "actions",
+            "youtube_subscriptions",
+            "logs",
+            "wiki",
+            "account",
+            "observability",
+            "public_status_everything",
+        }
+        admin_only_endpoints = {
+            "users",
+            "command_permissions",
+            "tag_responses",
+            "guild_settings",
+            "settings",
+            "bot_profile",
+        }
+        allowed_endpoints = login_allowed_endpoints | admin_only_endpoints
+        if next_endpoint in allowed_endpoints:
+            if next_endpoint in admin_only_endpoints and not bool(session.get("is_admin")):
+                return redirect(url_for("dashboard"))
+            return redirect(url_for(next_endpoint))
         return redirect(url_for("dashboard"))
 
     @app.get("/admin")
@@ -2245,10 +2285,10 @@ def create_app(
         log_options = list(dict.fromkeys([*LOG_FILE_OPTIONS, *discovered_logs]))
         if not log_options:
             log_options = list(LOG_FILE_OPTIONS)
-        selected_log = request.args.get("log", log_options[0]).strip()
+        selected_log = Path(request.args.get("log", log_options[0]).strip()).name
         if selected_log not in log_options:
             selected_log = log_options[0]
-        log_preview = _tail_file(log_dir / selected_log)
+        log_preview = _tail_file(log_dir, selected_log)
         return _render_page(
             "logs",
             "Web Admin Logs",
