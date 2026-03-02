@@ -69,7 +69,7 @@ GitHub workflows included:
 ## Run With Docker Compose
 
 ```bash
-docker compose up --build -d
+docker compose up -d
 ```
 
 ## Docker Image Publish (GitHub Packages / GHCR)
