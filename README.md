@@ -78,6 +78,10 @@ GitHub workflows included:
 - `.github/workflows/ci.yml` - lint/test/audit/docker build
 - `.github/workflows/security.yml` - Gitleaks + Trivy FS/Image scans
 - `.github/workflows/codeql.yml` - CodeQL static analysis
+- `.github/workflows/dependency-review.yml` - dependency risk gate for pull requests
+- `.github/workflows/python-vulnerability-scan.yml` - scheduled + on-change `pip-audit`
+- `.github/workflows/sbom.yml` - CycloneDX SBOM generation artifact
+- `.github/workflows/scorecards.yml` - weekly OSSF Scorecards analysis
 - `.github/dependabot.yml` - weekly dependency updates
 
 ## Run With Docker Compose
