@@ -22,9 +22,15 @@ Set these in `env.env`:
 - `WEB_BIND_HOST` - web server bind host (use `0.0.0.0` in Docker)
 - `WEB_PORT` - web GUI port inside container
 - `ENABLE_MEMBERS_INTENT` - set `true` only if you enabled Server Members Intent in Discord Developer Portal
+- `COMMAND_RESPONSES_EPHEMERAL` - set `false` for public command replies, `true` for user-only (ephemeral) replies
+- `PUPPY_IMAGE_API_URL` - API endpoint used by `/happy` for random puppy images
+- `PUPPY_IMAGE_TIMEOUT_SECONDS` - timeout for puppy image API requests
 - `SHORTENER_ENABLED` - enable Shortipy integration commands (`/shorten`, `/expand`)
 - `SHORTENER_BASE_URL` - Shortipy base URL (example: `https://l.twy4.us`)
 - `SHORTENER_TIMEOUT_SECONDS` - timeout for Shortipy requests
+- `YOUTUBE_NOTIFY_ENABLED` - enable background YouTube upload notifications
+- `YOUTUBE_POLL_INTERVAL_SECONDS` - polling interval for YouTube feed checks
+- `YOUTUBE_REQUEST_TIMEOUT_SECONDS` - timeout for YouTube URL/feed requests
 - `UPTIME_STATUS_ENABLED` - enable uptime status integration command (`/uptime`)
 - `UPTIME_STATUS_PAGE_URL` - public Uptime Kuma status page URL (example: `https://randy.wickedyoda.com/status/everything`)
 - `UPTIME_STATUS_TIMEOUT_SECONDS` - timeout for uptime API requests
@@ -36,11 +42,15 @@ Set these in `env.env`:
 - `WEB_SESSION_COOKIE_SAMESITE` - cookie same-site policy (`Lax`, `Strict`, `None`)
 - `WEB_SESSION_TIMEOUT_MINUTES` - web session timeout (minutes)
 - `DATA_DIR` - persistent internal data directory for moderation action history (recommended: `/app/data`)
+- `LOG_DIR` - optional override for log file directory shown in web GUI Logs page
+- `WEB_ENV_FILE` - optional path to env file used by web GUI settings editor (default: `./env.env`)
+- `WEB_GITHUB_WIKI_URL` - optional external wiki URL button in the web GUI Wiki page
 
 ## Included Slash Commands
 
 - `/ping`
 - `/sayhi`
+- `/happy`
 - `/shorten`
 - `/expand`
 - `/uptime`
@@ -64,9 +74,22 @@ SQLite storage is internal to the container at `/app/data/mod_actions.db`.
 - Pages:
   - Dashboard (`/admin`)
   - Action history (`/admin/actions`)
-  - Runtime settings view (`/admin/settings`)
+  - YouTube subscriptions (`/admin/youtube`)
+  - Logs viewer (`/admin/logs`)
+  - Wiki viewer (`/admin/wiki`)
+  - Account password management (`/admin/account`)
+  - User management (`/admin/users`, admin only)
+  - Runtime settings editor (`/admin/settings`, admin only)
 
 The GUI is built with responsive Bootstrap layout for mobile and desktop.
+Settings are editable from the GUI and saved back to `env.env` (or `WEB_ENV_FILE`), with dropdown selectors for boolean and common numeric options where possible.
+
+## YouTube Auto Notifications
+
+- Open `/admin/youtube` in the web GUI.
+- Add a YouTube channel URL and select the Discord channel to notify.
+- The bot stores subscriptions in SQLite and polls YouTube feeds.
+- On new uploads, it posts a notification embed in the selected Discord channel(s).
 
 ## Verification And Security Checks
 
@@ -105,6 +128,7 @@ docker compose up -d
 Workflow: `.github/workflows/docker-publish.yml`
 
 - Publishes on push to `main`, semantic version tags (`v*.*.*`), or manual run.
+- Publishes automatically after successful `CI` completion on `main`, on semantic version tags (`v*.*.*`), or manual run.
 - Push target:
   - `ghcr.io/<owner>/<repo>:latest`
   - `ghcr.io/<owner>/<repo>:<branch|tag|sha>`

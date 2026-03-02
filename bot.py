@@ -8,6 +8,7 @@ import sqlite3
 import tempfile
 import threading
 import urllib.parse
+import xml.etree.ElementTree as ET
 from datetime import UTC, datetime, timedelta
 
 import discord
@@ -56,13 +57,25 @@ WEB_ENABLED = env_bool("WEB_ENABLED", True)
 WEB_BIND_HOST = os.getenv("WEB_BIND_HOST", "127.0.0.1")
 WEB_PORT = env_int("WEB_PORT", 8080)
 ENABLE_MEMBERS_INTENT = env_bool("ENABLE_MEMBERS_INTENT", False)
+COMMAND_RESPONSES_EPHEMERAL = env_bool("COMMAND_RESPONSES_EPHEMERAL", False)
 SHORTENER_ENABLED = env_bool("SHORTENER_ENABLED", False)
 SHORTENER_TIMEOUT_SECONDS = env_int("SHORTENER_TIMEOUT_SECONDS", 8)
+PUPPY_IMAGE_API_URL = os.getenv("PUPPY_IMAGE_API_URL", "https://dog.ceo/api/breeds/image/random").strip()
+PUPPY_IMAGE_TIMEOUT_SECONDS = env_int("PUPPY_IMAGE_TIMEOUT_SECONDS", 8)
+YOUTUBE_NOTIFY_ENABLED = env_bool("YOUTUBE_NOTIFY_ENABLED", True)
+YOUTUBE_POLL_INTERVAL_SECONDS = env_int("YOUTUBE_POLL_INTERVAL_SECONDS", 300)
+YOUTUBE_REQUEST_TIMEOUT_SECONDS = env_int("YOUTUBE_REQUEST_TIMEOUT_SECONDS", 12)
 UPTIME_STATUS_ENABLED = env_bool("UPTIME_STATUS_ENABLED", True)
 UPTIME_STATUS_TIMEOUT_SECONDS = env_int("UPTIME_STATUS_TIMEOUT_SECONDS", 8)
 
 SHORT_CODE_REGEX = re.compile(r"Link saved:\s*([0-9]{4,})")
 STATUS_PAGE_PATH_REGEX = re.compile(r"^/status/([^/]+)/?$")
+YOUTUBE_CHANNEL_ID_PATTERN = re.compile(r"(UC[a-zA-Z0-9_-]{22})")
+YOUTUBE_CHANNEL_ID_META_PATTERNS = (
+    re.compile(r'"channelId":"(UC[a-zA-Z0-9_-]{22})"'),
+    re.compile(r'itemprop="channelId"\s+content="(UC[a-zA-Z0-9_-]{22})"'),
+    re.compile(r'"externalId":"(UC[a-zA-Z0-9_-]{22})"'),
+)
 
 
 def normalize_shortener_base_url(raw_url: str) -> str:
@@ -100,6 +113,12 @@ UPTIME_API_HEARTBEAT_URL = f"{UPTIME_API_BASE}/api/status-page/heartbeat/{UPTIME
 
 if SHORTENER_TIMEOUT_SECONDS <= 0:
     raise RuntimeError("SHORTENER_TIMEOUT_SECONDS must be a positive integer.")
+if PUPPY_IMAGE_TIMEOUT_SECONDS <= 0:
+    raise RuntimeError("PUPPY_IMAGE_TIMEOUT_SECONDS must be a positive integer.")
+if YOUTUBE_POLL_INTERVAL_SECONDS <= 0:
+    raise RuntimeError("YOUTUBE_POLL_INTERVAL_SECONDS must be a positive integer.")
+if YOUTUBE_REQUEST_TIMEOUT_SECONDS <= 0:
+    raise RuntimeError("YOUTUBE_REQUEST_TIMEOUT_SECONDS must be a positive integer.")
 if UPTIME_STATUS_TIMEOUT_SECONDS <= 0:
     raise RuntimeError("UPTIME_STATUS_TIMEOUT_SECONDS must be a positive integer.")
 
@@ -208,6 +227,172 @@ def expand_short_url(short_url: str) -> str:
     if status >= 400:
         raise RuntimeError(f"Shortener returned HTTP {status}.")
     raise RuntimeError("Shortener did not return a redirect target.")
+
+
+def fetch_random_puppy_image_url() -> str:
+    parsed = urllib.parse.urlparse(PUPPY_IMAGE_API_URL)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuntimeError("PUPPY_IMAGE_API_URL is invalid.")
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+
+    connection_cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+    conn = connection_cls(parsed.netloc, timeout=PUPPY_IMAGE_TIMEOUT_SECONDS)
+    try:
+        conn.request("GET", path, headers={"User-Agent": "WickedYodaLittleHelper/1.0", "Accept": "application/json"})
+        response = conn.getresponse()
+        body_text = response.read().decode("utf-8", errors="ignore")
+    except OSError as exc:
+        raise RuntimeError(f"Puppy API request failed: {exc}") from exc
+    finally:
+        conn.close()
+
+    if response.status >= 400:
+        raise RuntimeError(f"Puppy API returned HTTP {response.status}.")
+
+    try:
+        parsed_body = json.loads(body_text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Puppy API returned invalid JSON.") from exc
+
+    if not isinstance(parsed_body, dict):
+        raise RuntimeError("Puppy API returned an unexpected payload.")
+
+    image_url = parsed_body.get("message")
+    if not isinstance(image_url, str):
+        raise RuntimeError("Puppy API response did not include an image URL.")
+
+    parsed_image_url = urllib.parse.urlparse(image_url)
+    if parsed_image_url.scheme not in {"http", "https"} or not parsed_image_url.netloc:
+        raise RuntimeError("Puppy API returned an invalid image URL.")
+
+    return image_url
+
+
+def fetch_text_url(url: str, timeout_seconds: int, accept: str) -> tuple[int, dict[str, str], str]:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuntimeError("Request URL is invalid.")
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+
+    connection_cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+    conn = connection_cls(parsed.netloc, timeout=timeout_seconds)
+    try:
+        conn.request("GET", path, headers={"User-Agent": "WickedYodaLittleHelper/1.0", "Accept": accept})
+        response = conn.getresponse()
+        response_headers = {name.lower(): value for name, value in response.getheaders()}
+        body_text = response.read().decode("utf-8", errors="ignore")
+    except OSError as exc:
+        raise RuntimeError(f"Request failed: {exc}") from exc
+    finally:
+        conn.close()
+    return response.status, response_headers, body_text
+
+
+def normalize_youtube_channel_url(raw_url: str) -> str:
+    value = raw_url.strip()
+    if not value:
+        raise ValueError("YouTube channel URL is required.")
+    if "://" not in value:
+        value = f"https://{value}"
+    parsed = urllib.parse.urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Invalid YouTube URL.")
+    host = parsed.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if host != "youtube.com":
+        raise ValueError("YouTube URL must be on youtube.com.")
+    if not parsed.path or parsed.path == "/":
+        raise ValueError("YouTube URL must include a channel path.")
+    return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", parsed.query, ""))
+
+
+def resolve_youtube_channel_id(source_url: str) -> str:
+    normalized_url = normalize_youtube_channel_url(source_url)
+    parsed = urllib.parse.urlparse(normalized_url)
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) >= 2 and path_parts[0] == "channel":
+        direct_channel_id = path_parts[1]
+        if YOUTUBE_CHANNEL_ID_PATTERN.fullmatch(direct_channel_id):
+            return direct_channel_id
+
+    if parsed.path == "/feeds/videos.xml":
+        query_values = urllib.parse.parse_qs(parsed.query)
+        channel_id = query_values.get("channel_id", [""])[0]
+        if YOUTUBE_CHANNEL_ID_PATTERN.fullmatch(channel_id):
+            return channel_id
+
+    status, _, body_text = fetch_text_url(normalized_url, timeout_seconds=YOUTUBE_REQUEST_TIMEOUT_SECONDS, accept="text/html")
+    if status >= 400:
+        raise RuntimeError(f"YouTube channel page returned HTTP {status}.")
+    for pattern in YOUTUBE_CHANNEL_ID_META_PATTERNS:
+        match = pattern.search(body_text)
+        if match:
+            return match.group(1)
+    raise RuntimeError("Unable to resolve YouTube channel ID from URL.")
+
+
+def fetch_latest_youtube_video(channel_id: str) -> dict:
+    if not YOUTUBE_CHANNEL_ID_PATTERN.fullmatch(channel_id):
+        raise RuntimeError("Invalid YouTube channel ID.")
+    feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    status, _, body_text = fetch_text_url(feed_url, timeout_seconds=YOUTUBE_REQUEST_TIMEOUT_SECONDS, accept="application/atom+xml")
+    if status >= 400:
+        raise RuntimeError(f"YouTube feed returned HTTP {status}.")
+
+    try:
+        root = ET.fromstring(body_text)
+    except ET.ParseError as exc:
+        raise RuntimeError("YouTube feed returned invalid XML.") from exc
+
+    ns = {
+        "atom": "http://www.w3.org/2005/Atom",
+        "yt": "http://www.youtube.com/xml/schemas/2015",
+    }
+    channel_title = root.findtext("atom:title", default="Unknown Channel", namespaces=ns).strip()
+    entry = root.find("atom:entry", ns)
+    if entry is None:
+        raise RuntimeError("YouTube feed has no entries.")
+
+    video_id = entry.findtext("yt:videoId", default="", namespaces=ns).strip()
+    video_title = entry.findtext("atom:title", default="Untitled", namespaces=ns).strip()
+    published_at = entry.findtext("atom:published", default="", namespaces=ns).strip()
+    link_el = entry.find("atom:link[@rel='alternate']", ns)
+    video_url = link_el.get("href", "").strip() if link_el is not None else ""
+    if not video_url and video_id:
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+    if not video_id:
+        raise RuntimeError("YouTube feed entry is missing video ID.")
+    if not video_url:
+        raise RuntimeError("YouTube feed entry is missing video URL.")
+
+    return {
+        "channel_id": channel_id,
+        "channel_title": channel_title,
+        "video_id": video_id,
+        "video_title": video_title,
+        "video_url": video_url,
+        "published_at": published_at,
+    }
+
+
+def resolve_youtube_subscription_seed(source_url: str) -> dict:
+    normalized_url = normalize_youtube_channel_url(source_url)
+    channel_id = resolve_youtube_channel_id(normalized_url)
+    latest = fetch_latest_youtube_video(channel_id)
+    return {
+        "source_url": normalized_url,
+        "channel_id": channel_id,
+        "channel_title": latest["channel_title"],
+        "last_video_id": latest["video_id"],
+        "last_video_title": latest["video_title"],
+        "last_published_at": latest["published_at"],
+    }
 
 
 def uptime_request_json(url: str) -> dict:
@@ -403,6 +588,24 @@ class ActionStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS youtube_subscriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    source_url TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    channel_title TEXT NOT NULL,
+                    target_channel_id INTEGER NOT NULL,
+                    target_channel_name TEXT NOT NULL,
+                    last_video_id TEXT,
+                    last_video_title TEXT,
+                    last_published_at TEXT,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    UNIQUE(channel_id, target_channel_id)
+                )
+                """
+            )
             conn.commit()
 
     def record(
@@ -433,6 +636,41 @@ class ActionStore:
                 )
                 conn.commit()
 
+    def list_youtube_subscriptions(self, enabled_only: bool = True) -> list[dict]:
+        query = """
+            SELECT id, created_at, source_url, channel_id, channel_title, target_channel_id,
+                   target_channel_name, last_video_id, last_video_title, last_published_at, enabled
+            FROM youtube_subscriptions
+        """
+        params: tuple = ()
+        if enabled_only:
+            query += " WHERE enabled = 1"
+        query += " ORDER BY id ASC"
+        with self._lock:
+            with self._connect() as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_youtube_last_video(
+        self,
+        subscription_id: int,
+        video_id: str,
+        video_title: str,
+        published_at: str,
+    ) -> None:
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    UPDATE youtube_subscriptions
+                    SET last_video_id = ?, last_video_title = ?, last_published_at = ?
+                    WHERE id = ?
+                    """,
+                    (video_id, video_title, published_at, subscription_id),
+                )
+                conn.commit()
+
 
 ACTION_DB_PATH = resolve_action_db_path()
 ACTION_STORE = ActionStore(ACTION_DB_PATH)
@@ -446,6 +684,8 @@ class ModerationBot(commands.Bot):
         self.expected_commands = 0
         self.started_at = datetime.now(UTC)
         self.web_thread: threading.Thread | None = None
+        self.youtube_monitor_task: asyncio.Task | None = None
+        self.web_channel_options: list[dict] = []
 
     async def sync_guild_commands(self, reason: str) -> None:
         expected = len(self.tree.get_commands(guild=self.guild_object))
@@ -468,10 +708,14 @@ class ModerationBot(commands.Bot):
             self.web_thread = start_web_admin(
                 db_path=ACTION_DB_PATH,
                 get_bot_snapshot=self.get_web_snapshot,
+                get_notification_channels=self.get_web_channel_options,
+                resolve_youtube_subscription=lambda source_url: resolve_youtube_subscription_seed(source_url),
                 host=WEB_BIND_HOST,
                 port=WEB_PORT,
             )
             logger.info("Web admin started at http://%s:%s", WEB_BIND_HOST, WEB_PORT)
+        if YOUTUBE_NOTIFY_ENABLED and self.youtube_monitor_task is None:
+            self.youtube_monitor_task = self.loop.create_task(self.youtube_monitor_loop(), name="youtube-monitor")
 
     async def on_ready(self) -> None:
         logger.info("Logged in as %s (%s)", self.user, self.user.id if self.user else "n/a")
@@ -482,6 +726,7 @@ class ModerationBot(commands.Bot):
                 self.expected_commands,
             )
             await self.sync_guild_commands(reason="ready-retry")
+        self.web_channel_options = self.build_web_channel_options()
         if not ENABLE_MEMBERS_INTENT:
             logger.info("ENABLE_MEMBERS_INTENT is disabled; no privileged members intent requested.")
         await log_action(
@@ -508,6 +753,89 @@ class ModerationBot(commands.Bot):
             "commands_synced": self.commands_synced,
             "started_at": self.started_at.isoformat(),
         }
+
+    def build_web_channel_options(self) -> list[dict]:
+        guild = self.get_guild(GUILD_ID)
+        if guild is None:
+            return []
+        options: list[dict] = []
+        for channel in sorted(guild.text_channels, key=lambda item: (item.position, item.name.lower())):
+            options.append({"id": channel.id, "name": f"#{channel.name}"})
+        return options
+
+    def get_web_channel_options(self) -> list[dict]:
+        return list(self.web_channel_options)
+
+    async def youtube_monitor_loop(self) -> None:
+        await self.wait_until_ready()
+        logger.info("YouTube notifier loop started. Poll interval: %ss", YOUTUBE_POLL_INTERVAL_SECONDS)
+        while not self.is_closed():
+            try:
+                await self.poll_youtube_subscriptions()
+            except Exception as exc:
+                logger.exception("YouTube notifier poll failed: %s", exc)
+            await asyncio.sleep(YOUTUBE_POLL_INTERVAL_SECONDS)
+
+    async def poll_youtube_subscriptions(self) -> None:
+        subscriptions = ACTION_STORE.list_youtube_subscriptions(enabled_only=True)
+        if not subscriptions:
+            return
+        self.web_channel_options = self.build_web_channel_options()
+        for subscription in subscriptions:
+            await self._process_youtube_subscription(subscription)
+
+    async def _process_youtube_subscription(self, subscription: dict) -> None:
+        subscription_id = int(subscription.get("id", 0))
+        channel_id = str(subscription.get("channel_id", "")).strip()
+        target_channel_id = int(subscription.get("target_channel_id", 0))
+        if subscription_id <= 0 or not channel_id or target_channel_id <= 0:
+            return
+
+        try:
+            latest = await asyncio.to_thread(fetch_latest_youtube_video, channel_id)
+        except RuntimeError as exc:
+            logger.warning("Unable to fetch YouTube feed for %s: %s", channel_id, exc)
+            return
+
+        last_video_id = str(subscription.get("last_video_id", "")).strip()
+        if latest["video_id"] == last_video_id:
+            return
+
+        notify_channel = await get_text_channel(self, target_channel_id)
+        if notify_channel is None:
+            logger.warning("Notify channel %s not found for YouTube subscription %s", target_channel_id, subscription_id)
+            return
+
+        embed = discord.Embed(
+            title=f"New video from {latest['channel_title']}",
+            description=f"[{latest['video_title']}]({latest['video_url']})",
+            color=discord.Color.red(),
+        )
+        embed.set_footer(text="YouTube Notification")
+        await notify_channel.send(embed=embed)
+
+        ACTION_STORE.update_youtube_last_video(
+            subscription_id=subscription_id,
+            video_id=latest["video_id"],
+            video_title=latest["video_title"],
+            published_at=latest["published_at"],
+        )
+        description = (
+            f"Action: `youtube_notify`\n"
+            f"Status: **Success**\n"
+            f"Guild: {GUILD_ID}\n"
+            f"Target: {notify_channel.mention} ({notify_channel.id})\n"
+            f"Reason: {latest['channel_title']} - {latest['video_title']}"
+        )
+        await log_action(self, "YouTube Notification", description, discord.Color.red())
+        record_action_safe(
+            action="youtube_notify",
+            status="success",
+            moderator="system",
+            target=f"{notify_channel.name} ({notify_channel.id})",
+            reason=truncate_log_text(f"{latest['channel_title']} - {latest['video_title']}"),
+            guild=str(GUILD_ID),
+        )
 
 
 bot = ModerationBot()
@@ -536,19 +864,26 @@ def record_action_safe(
 
 async def reply_ephemeral(interaction: discord.Interaction, message: str) -> None:
     if interaction.response.is_done():
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
     else:
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.response.send_message(message, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
 
 
-async def get_log_channel(client: commands.Bot) -> discord.TextChannel | None:
-    channel = client.get_channel(BOT_LOG_CHANNEL)
+async def get_text_channel(client: commands.Bot, channel_id: int) -> discord.TextChannel | None:
+    channel = client.get_channel(channel_id)
     if isinstance(channel, discord.TextChannel):
         return channel
-    fetched = await client.fetch_channel(BOT_LOG_CHANNEL)
+    try:
+        fetched = await client.fetch_channel(channel_id)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        return None
     if isinstance(fetched, discord.TextChannel):
         return fetched
     return None
+
+
+async def get_log_channel(client: commands.Bot) -> discord.TextChannel | None:
+    return await get_text_channel(client, BOT_LOG_CHANNEL)
 
 
 async def log_action(client: commands.Bot, title: str, description: str, color: discord.Color) -> None:
@@ -597,7 +932,10 @@ async def log_interaction(
 
 @bot.tree.command(name="ping", description="Check if the bot is online.", guild=discord.Object(id=GUILD_ID))
 async def ping(interaction: discord.Interaction) -> None:
-    await interaction.response.send_message("WickedYoda's Little Helper is online.", ephemeral=True)
+    await interaction.response.send_message(
+        "WickedYoda's Little Helper is online.",
+        ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+    )
     await log_interaction(interaction, action="ping", success=True)
 
 
@@ -606,6 +944,37 @@ async def sayhi(interaction: discord.Interaction) -> None:
     intro = "Hi everyone, I am WickedYoda's Little Helper.\nI can help with moderation, URL short links, and uptime checks."
     await interaction.response.send_message(intro)
     await log_interaction(interaction, action="sayhi", reason="Posted channel introduction", success=True)
+
+
+@bot.tree.command(name="happy", description="Post a random puppy picture.", guild=discord.Object(id=GUILD_ID))
+async def happy(interaction: discord.Interaction) -> None:
+    await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+    try:
+        image_url = await asyncio.to_thread(fetch_random_puppy_image_url)
+        embed = discord.Embed(
+            title="Puppy Time",
+            description="Here is a random puppy picture.",
+            color=discord.Color.green(),
+        )
+        embed.set_image(url=image_url)
+        await interaction.followup.send(embed=embed, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+        await log_interaction(
+            interaction,
+            action="happy",
+            reason=truncate_log_text(image_url),
+            success=True,
+        )
+    except RuntimeError as exc:
+        await interaction.followup.send(
+            f"Failed to fetch puppy picture: {exc}",
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+        )
+        await log_interaction(
+            interaction,
+            action="happy",
+            reason=truncate_log_text(str(exc)),
+            success=False,
+        )
 
 
 @bot.tree.command(name="shorten", description="Create a short URL.", guild=discord.Object(id=GUILD_ID))
@@ -623,10 +992,13 @@ async def shorten(interaction: discord.Interaction, url: str) -> None:
         await log_interaction(interaction, action="shorten", reason=str(exc), success=False)
         return
 
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
     try:
         _, short_url = await asyncio.to_thread(create_short_url, normalized_url)
-        await interaction.followup.send(f"Short URL: {short_url}", ephemeral=True)
+        await interaction.followup.send(
+            f"Short URL: {short_url}",
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+        )
         await log_interaction(
             interaction,
             action="shorten",
@@ -634,7 +1006,10 @@ async def shorten(interaction: discord.Interaction, url: str) -> None:
             success=True,
         )
     except RuntimeError as exc:
-        await interaction.followup.send(f"Failed to shorten URL: {exc}", ephemeral=True)
+        await interaction.followup.send(
+            f"Failed to shorten URL: {exc}",
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+        )
         await log_interaction(interaction, action="shorten", reason=truncate_log_text(str(exc)), success=False)
 
 
@@ -653,10 +1028,13 @@ async def expand(interaction: discord.Interaction, value: str) -> None:
         await log_interaction(interaction, action="expand", reason=str(exc), success=False)
         return
 
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
     try:
         resolved_url = await asyncio.to_thread(expand_short_url, short_url)
-        await interaction.followup.send(f"Expanded URL: {resolved_url}", ephemeral=True)
+        await interaction.followup.send(
+            f"Expanded URL: {resolved_url}",
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+        )
         await log_interaction(
             interaction,
             action="expand",
@@ -664,7 +1042,10 @@ async def expand(interaction: discord.Interaction, value: str) -> None:
             success=True,
         )
     except RuntimeError as exc:
-        await interaction.followup.send(f"Failed to expand URL: {exc}", ephemeral=True)
+        await interaction.followup.send(
+            f"Failed to expand URL: {exc}",
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+        )
         await log_interaction(interaction, action="expand", reason=truncate_log_text(str(exc)), success=False)
 
 
@@ -675,11 +1056,11 @@ async def uptime(interaction: discord.Interaction) -> None:
         await log_interaction(interaction, action="uptime", reason="uptime integration disabled", success=False)
         return
 
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
     try:
         snapshot = await asyncio.to_thread(fetch_uptime_snapshot)
         summary = format_uptime_summary(snapshot)
-        await interaction.followup.send(summary, ephemeral=True)
+        await interaction.followup.send(summary, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
         counts = snapshot.get("counts", {})
         await log_interaction(
             interaction,
@@ -688,7 +1069,10 @@ async def uptime(interaction: discord.Interaction) -> None:
             success=True,
         )
     except RuntimeError as exc:
-        await interaction.followup.send(f"Failed to fetch uptime status: {exc}", ephemeral=True)
+        await interaction.followup.send(
+            f"Failed to fetch uptime status: {exc}",
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+        )
         await log_interaction(interaction, action="uptime", reason=truncate_log_text(str(exc)), success=False)
 
 
@@ -781,9 +1165,12 @@ async def purge(interaction: discord.Interaction, amount: app_commands.Range[int
         return
 
     try:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
         deleted = await interaction.channel.purge(limit=amount)
-        await interaction.followup.send(f"Deleted {len(deleted)} message(s).", ephemeral=True)
+        await interaction.followup.send(
+            f"Deleted {len(deleted)} message(s).",
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+        )
         await log_interaction(interaction, action="purge", reason=f"Deleted {len(deleted)} messages", success=True)
     except Exception as exc:
         await reply_ephemeral(interaction, f"Failed to purge messages: {exc}")

@@ -5,6 +5,15 @@ This folder contains internal project wiki docs for bot operations and command b
 ## Pages
 
 - [Command Reference](./Command-Reference.md) - all active slash commands and permission requirements.
+- Web Admin GUI (implemented in `web_admin.py`):
+  - Dashboard: `/admin`
+  - Actions: `/admin/actions`
+  - YouTube subscriptions: `/admin/youtube`
+  - Logs: `/admin/logs`
+  - Wiki: `/admin/wiki`
+  - Account: `/admin/account`
+  - Users (admin only): `/admin/users`
+  - Settings editor (admin only): `/admin/settings`
 
 ## Maintenance Rule
 

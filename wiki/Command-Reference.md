@@ -4,6 +4,10 @@ Last Updated: 2026-03-02
 
 Guild-scoped slash commands currently registered in `bot.py`.
 
+Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_EPHEMERAL`:
+- `false` (default): bot responses are public in-channel
+- `true`: bot responses are only visible to the command user
+
 ## `/ping`
 
 - Description: Check if the bot is online.
@@ -22,6 +26,17 @@ Guild-scoped slash commands currently registered in `bot.py`.
   - Posts a public introduction message in the channel.
   - Logs success to `Bot_Log_Channel` and SQLite action history.
 
+## `/happy`
+
+- Description: Post a random puppy picture in the channel.
+- Parameters: none
+- Required user permissions: none
+- Bot action:
+  - Fetches a random dog image URL from `PUPPY_IMAGE_API_URL`.
+  - Sends an embed with the image.
+  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
+  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+
 ## `/shorten`
 
 - Description: Create a short URL with the configured Shortipy instance.
@@ -31,7 +46,8 @@ Guild-scoped slash commands currently registered in `bot.py`.
 - Bot action:
   - Validates URL format (`http`/`https`).
   - Sends URL to `SHORTENER_BASE_URL` via Shortipy form POST.
-  - Replies with generated short URL (ephemeral).
+  - Replies with generated short URL.
+  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
   - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
 
 ## `/expand`
@@ -43,7 +59,8 @@ Guild-scoped slash commands currently registered in `bot.py`.
 - Bot action:
   - Validates short code/URL against `SHORTENER_BASE_URL`.
   - Requests short URL and reads redirect target.
-  - Replies with expanded destination URL (ephemeral).
+  - Replies with expanded destination URL.
+  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
   - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
 
 ## `/uptime`
@@ -55,7 +72,8 @@ Guild-scoped slash commands currently registered in `bot.py`.
   - Calls Uptime Kuma API endpoints derived from `UPTIME_STATUS_PAGE_URL`.
   - Summarizes monitor counts (`Up`, `Down`, `Pending`, `Maintenance`, `Unknown`).
   - Includes a short list of currently down monitors.
-  - Replies ephemerally and logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
+  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
 
 ## `/kick`
 
