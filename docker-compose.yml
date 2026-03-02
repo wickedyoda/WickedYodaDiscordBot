@@ -1,13 +1,12 @@
 services:
   wickedyoda-helper:
-    build: .
+    image: ghcr.io/wickedyoda/wickedyodadiscordbot:latest
+    pull_policy: always
     container_name: wickedyoda-little-helper
     env_file:
       - env.env
     ports:
       - "8080:8080"
-    volumes:
-      - ./data:/app/data
     security_opt:
       - no-new-privileges:true
     cap_drop:

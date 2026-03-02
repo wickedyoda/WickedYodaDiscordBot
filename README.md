@@ -19,7 +19,7 @@ Set these in `env.env`:
 - `WEB_SESSION_COOKIE_SECURE` - set `true` when using HTTPS
 - `WEB_SESSION_COOKIE_SAMESITE` - cookie same-site policy (`Lax`, `Strict`, `None`)
 - `WEB_SESSION_TIMEOUT_MINUTES` - web session timeout (minutes)
-- `DATA_DIR` - persistent data directory for moderation action history
+- `DATA_DIR` - persistent internal data directory for moderation action history (recommended: `/app/data`)
 
 ## Included Slash Commands
 
@@ -32,6 +32,8 @@ Set these in `env.env`:
 
 All command actions (success/failure) are logged to `Bot_Log_Channel`.
 All actions are also written to SQLite and visible in the web GUI.
+
+SQLite storage is internal to the container at `/app/data/mod_actions.db`.
 
 ## Web Admin GUI
 
@@ -69,7 +71,7 @@ GitHub workflows included:
 ## Run With Docker Compose
 
 ```bash
-docker compose up --build -d
+docker compose up -d
 ```
 
 ## Docker Image Publish (GitHub Packages / GHCR)
