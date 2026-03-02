@@ -2,6 +2,15 @@
 
 Basic moderation Discord bot with a mobile-friendly web admin GUI, designed to run in Docker using `env.env`.
 
+## Wiki
+
+Project wiki files live in [`wiki/`](wiki/).
+
+- [`wiki/Home.md`](wiki/Home.md) - wiki index and maintenance workflow
+- [`wiki/Command-Reference.md`](wiki/Command-Reference.md) - full slash command documentation
+
+When adding or changing a bot command, update `wiki/Command-Reference.md` in the same pull request.
+
 ## Environment Variables
 
 Set these in `env.env`:
@@ -30,6 +39,8 @@ Set these in `env.env`:
 - `/timeout`
 - `/untimeout`
 - `/purge`
+
+Detailed command behavior, parameters, and permission requirements are documented in [`wiki/Command-Reference.md`](wiki/Command-Reference.md).
 
 All command actions (success/failure) are logged to `Bot_Log_Channel`.
 All actions are also written to SQLite and visible in the web GUI.
