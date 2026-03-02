@@ -43,7 +43,7 @@ jobs:
           exit-code: "1"
 
       - name: Upload FS scan results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-fs.sarif
 
@@ -75,6 +75,6 @@ jobs:
           exit-code: "1"
 
       - name: Upload image scan results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-image.sarif
