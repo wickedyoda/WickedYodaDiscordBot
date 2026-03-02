@@ -46,7 +46,6 @@ GUILD_ID = int(required_env("GUILD_ID"))
 BOT_LOG_CHANNEL = int(required_env("Bot_Log_Channel"))
 
 DATA_DIR = os.getenv("DATA_DIR", "data")
-ACTION_DB_PATH = os.path.join(DATA_DIR, "mod_actions.db")
 WEB_ENABLED = env_bool("WEB_ENABLED", True)
 WEB_BIND_HOST = os.getenv("WEB_BIND_HOST", "0.0.0.0")
 WEB_PORT = env_int("WEB_PORT", 8080)
@@ -56,6 +55,31 @@ intents.guilds = True
 intents.members = True
 intents.messages = True
 intents.message_content = False
+
+
+def resolve_action_db_path() -> str:
+    configured_path = os.getenv("ACTION_DB_PATH", "").strip()
+    preferred_path = configured_path or os.path.join(DATA_DIR, "mod_actions.db")
+    fallback_path = "/tmp/wickedyoda/mod_actions.db"
+    candidates = [preferred_path]
+    if fallback_path != preferred_path:
+        candidates.append(fallback_path)
+
+    for path in candidates:
+        try:
+            directory = os.path.dirname(path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            with sqlite3.connect(path, timeout=5) as conn:
+                conn.execute("PRAGMA user_version = 1")
+                conn.commit()
+            if path != preferred_path:
+                logger.warning("Action DB path %s is not writable; using fallback %s", preferred_path, path)
+            return path
+        except Exception as exc:
+            logger.warning("Unable to use action DB path %s: %s", path, exc)
+
+    raise RuntimeError("No writable SQLite database path found for moderation action store.")
 
 
 class ActionStore:
@@ -117,6 +141,7 @@ class ActionStore:
                 conn.commit()
 
 
+ACTION_DB_PATH = resolve_action_db_path()
 ACTION_STORE = ActionStore(ACTION_DB_PATH)
 
 
