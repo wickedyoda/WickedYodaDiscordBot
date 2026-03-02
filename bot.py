@@ -105,9 +105,7 @@ elif MANAGED_GUILD_IDS:
     GUILD_ID = sorted(MANAGED_GUILD_IDS)[0]
 else:
     GUILD_ID = 0
-    logger.warning(
-        "GUILD_ID is not set and MANAGED_GUILD_IDS is empty. Multi-guild mode will activate after guild discovery."
-    )
+    logger.warning("GUILD_ID is not set and MANAGED_GUILD_IDS is empty. Multi-guild mode will activate after guild discovery.")
 
 BOT_LOG_CHANNEL_CONFIGURED = optional_positive_int_env("Bot_Log_Channel")
 BOT_LOG_CHANNEL = BOT_LOG_CHANNEL_CONFIGURED or 0
