@@ -13,6 +13,8 @@ This folder contains internal project wiki docs for bot operations and command b
   - Wiki: `/admin/wiki`
   - Account: `/admin/account`
   - Users (admin only): `/admin/users`
+  - Command Permissions (admin only): `/admin/command-permissions`
+  - Tag Responses (admin only): `/admin/tag-responses`
   - Settings editor (admin only): `/admin/settings`
 
 ## Maintenance Rule

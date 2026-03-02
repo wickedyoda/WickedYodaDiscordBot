@@ -76,6 +76,127 @@ YOUTUBE_CHANNEL_ID_META_PATTERNS = (
     re.compile(r'itemprop="channelId"\s+content="(UC[a-zA-Z0-9_-]{22})"'),
     re.compile(r'"externalId":"(UC[a-zA-Z0-9_-]{22})"'),
 )
+USER_ID_INPUT_PATTERN = re.compile(r"^\d{17,20}$")
+
+COMMAND_PERMISSION_MODE_DEFAULT = "default"
+COMMAND_PERMISSION_MODE_PUBLIC = "public"
+COMMAND_PERMISSION_MODE_CUSTOM_ROLES = "custom_roles"
+COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC = "public"
+COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR = "moderator"
+COMMAND_PERMISSION_POLICY_LABELS = {
+    COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC: "Public (all members)",
+    COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR: "Moderator (ban/kick/manage roles/messages/moderate)",
+}
+COMMAND_PERMISSION_METADATA: dict[str, dict[str, str]] = {
+    "ping": {"label": "/ping", "description": "Health check", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
+    "sayhi": {"label": "/sayhi", "description": "Bot introduction", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
+    "happy": {"label": "/happy", "description": "Random puppy image", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
+    "shorten": {"label": "/shorten", "description": "Create short URL", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
+    "expand": {"label": "/expand", "description": "Expand short URL", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
+    "uptime": {"label": "/uptime", "description": "Uptime monitor summary", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
+    "help": {"label": "/help", "description": "Command overview", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
+    "tags": {"label": "/tags", "description": "List configured tags", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
+    "tag": {"label": "/tag", "description": "Post a configured tag", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
+    "kick": {"label": "/kick", "description": "Kick member", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR},
+    "ban": {"label": "/ban", "description": "Ban member", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR},
+    "timeout": {"label": "/timeout", "description": "Timeout member", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR},
+    "untimeout": {"label": "/untimeout", "description": "Remove timeout", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR},
+    "purge": {"label": "/purge", "description": "Purge messages", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR},
+    "unban": {"label": "/unban", "description": "Unban by user ID", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR},
+    "addrole": {"label": "/addrole", "description": "Add role to member", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR},
+    "removerole": {
+        "label": "/removerole",
+        "description": "Remove role from member",
+        "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR,
+    },
+}
+DEFAULT_TAG_RESPONSES = {
+    "!rules": "Please review the server rules and pinned messages before posting.",
+    "!support": "Need help? Open a support thread with details and device/version info.",
+}
+
+
+def normalize_tag(raw_tag: str) -> str:
+    value = (raw_tag or "").strip().lower()
+    if not value:
+        return ""
+    if value.startswith("/"):
+        value = value[1:]
+    if not value.startswith("!"):
+        value = f"!{value}"
+    value = value.replace(" ", "")
+    if not re.fullmatch(r"![a-z0-9_-]{1,40}", value):
+        return ""
+    return value
+
+
+def normalize_permission_mode(value: str | None) -> str:
+    candidate = (value or "").strip().lower()
+    if candidate in {COMMAND_PERMISSION_MODE_DEFAULT, COMMAND_PERMISSION_MODE_PUBLIC, COMMAND_PERMISSION_MODE_CUSTOM_ROLES}:
+        return candidate
+    return COMMAND_PERMISSION_MODE_DEFAULT
+
+
+def normalize_role_ids(values: list[str] | str | None) -> list[int]:
+    normalized: list[int] = []
+    seen: set[int] = set()
+    source: list[str]
+    if isinstance(values, str):
+        source = re.split(r"[\s,]+", values.strip()) if values.strip() else []
+    elif isinstance(values, list):
+        source = [str(item) for item in values]
+    else:
+        source = []
+    for raw in source:
+        value = raw.strip()
+        if value.startswith("<@&") and value.endswith(">"):
+            value = value[3:-1]
+        if not value.isdigit():
+            continue
+        role_id = int(value)
+        if role_id <= 0 or role_id in seen:
+            continue
+        seen.add(role_id)
+        normalized.append(role_id)
+    return normalized
+
+
+def normalize_command_permission_rule(raw_rule: dict | None) -> dict[str, str | list[int]]:
+    if not isinstance(raw_rule, dict):
+        return {"mode": COMMAND_PERMISSION_MODE_DEFAULT, "role_ids": []}
+    mode = normalize_permission_mode(str(raw_rule.get("mode", COMMAND_PERMISSION_MODE_DEFAULT)))
+    role_ids = normalize_role_ids(raw_rule.get("role_ids")) if mode == COMMAND_PERMISSION_MODE_CUSTOM_ROLES else []
+    return {"mode": mode, "role_ids": role_ids}
+
+
+def parse_user_id_input(raw_value: str) -> int | None:
+    value = (raw_value or "").strip()
+    if value.startswith("<@") and value.endswith(">"):
+        value = value.strip("<@!>")
+    if not USER_ID_INPUT_PATTERN.fullmatch(value):
+        return None
+    return int(value)
+
+
+def is_moderator_member(member: discord.Member | discord.User) -> bool:
+    if not isinstance(member, discord.Member):
+        return False
+    perms = member.guild_permissions
+    return bool(
+        perms.administrator
+        or perms.kick_members
+        or perms.ban_members
+        or perms.manage_messages
+        or perms.manage_roles
+        or perms.moderate_members
+    )
+
+
+def member_has_any_role_id(member: discord.Member | discord.User, role_ids: list[int]) -> bool:
+    if not isinstance(member, discord.Member) or not role_ids:
+        return False
+    member_role_ids = {role.id for role in member.roles}
+    return any(role_id in member_role_ids for role_id in role_ids)
 
 
 def normalize_shortener_base_url(raw_url: str) -> str:
@@ -606,6 +727,36 @@ class ActionStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS command_permissions (
+                    command_key TEXT PRIMARY KEY,
+                    mode TEXT NOT NULL,
+                    role_ids_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tag_responses (
+                    tag TEXT PRIMARY KEY,
+                    response TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            existing_tags = conn.execute("SELECT COUNT(*) FROM tag_responses").fetchone()[0]
+            if int(existing_tags) == 0:
+                now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+                for tag, response in DEFAULT_TAG_RESPONSES.items():
+                    conn.execute(
+                        """
+                        INSERT INTO tag_responses (tag, response, updated_at)
+                        VALUES (?, ?, ?)
+                        """,
+                        (tag, response, now),
+                    )
             conn.commit()
 
     def record(
@@ -671,9 +822,236 @@ class ActionStore:
                 )
                 conn.commit()
 
+    def get_command_permissions(self) -> dict[str, dict[str, str | list[int]]]:
+        with self._lock:
+            with self._connect() as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute("SELECT command_key, mode, role_ids_json FROM command_permissions").fetchall()
+        mapping: dict[str, dict[str, str | list[int]]] = {}
+        for row in rows:
+            command_key = str(row["command_key"]).strip()
+            if command_key not in COMMAND_PERMISSION_METADATA:
+                continue
+            raw_role_ids = row["role_ids_json"]
+            try:
+                parsed_role_ids = json.loads(raw_role_ids) if isinstance(raw_role_ids, str) else []
+            except json.JSONDecodeError:
+                parsed_role_ids = []
+            mapping[command_key] = normalize_command_permission_rule({"mode": row["mode"], "role_ids": parsed_role_ids})
+        return mapping
+
+    def save_command_permissions(self, rules: dict[str, dict[str, str | list[int]]]) -> dict[str, dict[str, str | list[int]]]:
+        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        stored_rules: dict[str, dict[str, str | list[int]]] = {}
+        for key, rule in (rules or {}).items():
+            if key not in COMMAND_PERMISSION_METADATA:
+                continue
+            normalized = normalize_command_permission_rule(rule)
+            if normalized["mode"] == COMMAND_PERMISSION_MODE_DEFAULT:
+                continue
+            stored_rules[key] = normalized
+
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute("DELETE FROM command_permissions")
+                for key, rule in stored_rules.items():
+                    conn.execute(
+                        """
+                        INSERT INTO command_permissions (command_key, mode, role_ids_json, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (key, str(rule["mode"]), json.dumps(rule["role_ids"]), now),
+                    )
+                conn.commit()
+        return stored_rules
+
+    def get_tag_responses(self) -> dict[str, str]:
+        with self._lock:
+            with self._connect() as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute("SELECT tag, response FROM tag_responses ORDER BY tag ASC").fetchall()
+        mapping: dict[str, str] = {}
+        for row in rows:
+            tag = normalize_tag(str(row["tag"]))
+            if not tag:
+                continue
+            response = str(row["response"]).strip()
+            if response:
+                mapping[tag] = response
+        return mapping
+
+    def save_tag_responses(self, mapping: dict[str, str]) -> dict[str, str]:
+        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        normalized: dict[str, str] = {}
+        for raw_tag, raw_response in (mapping or {}).items():
+            tag = normalize_tag(str(raw_tag))
+            response = str(raw_response).strip()
+            if not tag or not response:
+                continue
+            normalized[tag] = truncate_log_text(response, max_length=1900)
+
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute("DELETE FROM tag_responses")
+                for tag, response in normalized.items():
+                    conn.execute(
+                        """
+                        INSERT INTO tag_responses (tag, response, updated_at)
+                        VALUES (?, ?, ?)
+                        """,
+                        (tag, response, now),
+                    )
+                conn.commit()
+        return normalized
+
 
 ACTION_DB_PATH = resolve_action_db_path()
 ACTION_STORE = ActionStore(ACTION_DB_PATH)
+
+
+def resolve_command_permission_state(command_key: str) -> tuple[str, str, list[int]]:
+    default_policy = COMMAND_PERMISSION_METADATA.get(command_key, {}).get("default_policy", COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC)
+    stored_rules = ACTION_STORE.get_command_permissions()
+    rule = normalize_command_permission_rule(stored_rules.get(command_key))
+    return str(default_policy), str(rule["mode"]), normalize_role_ids(rule["role_ids"])
+
+
+def can_use_command(member: discord.Member | discord.User, command_key: str) -> bool:
+    default_policy, mode, role_ids = resolve_command_permission_state(command_key)
+    if mode == COMMAND_PERMISSION_MODE_PUBLIC:
+        return True
+    if mode == COMMAND_PERMISSION_MODE_CUSTOM_ROLES:
+        return member_has_any_role_id(member, role_ids)
+    if default_policy == COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR:
+        return is_moderator_member(member)
+    return True
+
+
+def build_command_permission_denied_message(command_key: str, guild: discord.Guild | None = None) -> str:
+    default_policy, mode, role_ids = resolve_command_permission_state(command_key)
+    if mode == COMMAND_PERMISSION_MODE_CUSTOM_ROLES:
+        if guild is None or not role_ids:
+            return "You do not have one of the roles required to run this command."
+        role_mentions: list[str] = []
+        for role_id in role_ids:
+            role = guild.get_role(role_id)
+            role_mentions.append(role.mention if role else f"`{role_id}`")
+        return f"You need one of these roles: {', '.join(role_mentions)}."
+    if default_policy == COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR:
+        return "Only moderators can use this command."
+    return "You do not have permission to use this command."
+
+
+def validate_moderation_target(actor: discord.Member, target: discord.Member, bot_member: discord.Member) -> tuple[bool, str | None]:
+    if target.id == actor.id:
+        return False, "You cannot moderate yourself."
+    if target.id == actor.guild.owner_id:
+        return False, "You cannot moderate the server owner."
+    if target.id == bot_member.id:
+        return False, "You cannot moderate the bot."
+    if actor.id != actor.guild.owner_id and actor.top_role <= target.top_role:
+        return False, "You can only moderate members below your top role."
+    if bot_member.top_role <= target.top_role:
+        return False, "I can only moderate members below my top role."
+    return True, None
+
+
+def validate_manageable_role(actor: discord.Member, role: discord.Role, bot_member: discord.Member) -> tuple[bool, str | None]:
+    if role == actor.guild.default_role:
+        return False, "You cannot manage the @everyone role."
+    if role.managed:
+        return False, "That role is managed by an integration."
+    if actor.id != actor.guild.owner_id and actor.top_role <= role:
+        return False, "You can only manage roles below your top role."
+    if bot_member.top_role <= role:
+        return False, "I can only manage roles below my top role."
+    return True, None
+
+
+def build_command_permissions_web_payload() -> dict:
+    rules = ACTION_STORE.get_command_permissions()
+    commands_payload: list[dict] = []
+    for command_key, metadata in COMMAND_PERMISSION_METADATA.items():
+        rule = normalize_command_permission_rule(rules.get(command_key))
+        default_policy = metadata.get("default_policy", COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC)
+        commands_payload.append(
+            {
+                "key": command_key,
+                "label": metadata.get("label", command_key),
+                "description": metadata.get("description", ""),
+                "default_policy": default_policy,
+                "default_policy_label": COMMAND_PERMISSION_POLICY_LABELS.get(default_policy, default_policy),
+                "mode": rule["mode"],
+                "role_ids": rule["role_ids"],
+            }
+        )
+    return {"ok": True, "commands": commands_payload}
+
+
+def run_web_get_command_permissions() -> dict:
+    try:
+        return build_command_permissions_web_payload()
+    except Exception as exc:
+        logger.exception("Failed to build command permissions payload: %s", exc)
+        return {"ok": False, "error": "Failed to load command permissions."}
+
+
+def run_web_update_command_permissions(payload: dict, _actor_email: str) -> dict:
+    if not isinstance(payload, dict):
+        return {"ok": False, "error": "Invalid payload."}
+    commands_payload = payload.get("commands")
+    if not isinstance(commands_payload, dict):
+        return {"ok": False, "error": "Missing commands payload."}
+
+    updated_rules: dict[str, dict[str, str | list[int]]] = {}
+    for command_key in COMMAND_PERMISSION_METADATA:
+        raw_rule = commands_payload.get(command_key, {})
+        if not isinstance(raw_rule, dict):
+            raw_rule = {}
+        mode = normalize_permission_mode(str(raw_rule.get("mode", COMMAND_PERMISSION_MODE_DEFAULT)))
+        role_ids = normalize_role_ids(raw_rule.get("role_ids"))
+        if mode == COMMAND_PERMISSION_MODE_CUSTOM_ROLES and not role_ids:
+            return {"ok": False, "error": f"{command_key}: custom_roles requires at least one role ID."}
+        updated_rules[command_key] = {"mode": mode, "role_ids": role_ids}
+
+    try:
+        ACTION_STORE.save_command_permissions(updated_rules)
+    except Exception as exc:
+        logger.exception("Failed to save command permissions: %s", exc)
+        return {"ok": False, "error": "Failed to save command permissions."}
+    response = build_command_permissions_web_payload()
+    response["message"] = "Command permissions updated."
+    return response
+
+
+def run_web_get_tag_responses() -> dict:
+    try:
+        mapping = ACTION_STORE.get_tag_responses()
+    except Exception as exc:
+        logger.exception("Failed to load tag responses: %s", exc)
+        return {"ok": False, "error": "Failed to load tag responses."}
+    return {"ok": True, "mapping": mapping}
+
+
+def run_web_save_tag_responses(mapping: dict, _actor_email: str) -> dict:
+    if not isinstance(mapping, dict):
+        return {"ok": False, "error": "Tag responses payload must be an object."}
+    normalized: dict[str, str] = {}
+    for raw_tag, raw_response in mapping.items():
+        if not isinstance(raw_tag, str) or not isinstance(raw_response, str):
+            return {"ok": False, "error": "All tag keys and values must be strings."}
+        tag = normalize_tag(raw_tag)
+        response = raw_response.strip()
+        if not tag or not response:
+            continue
+        normalized[tag] = response
+
+    try:
+        saved = ACTION_STORE.save_tag_responses(normalized)
+    except Exception as exc:
+        logger.exception("Failed to save tag responses: %s", exc)
+        return {"ok": False, "error": "Failed to save tag responses."}
+    return {"ok": True, "mapping": saved, "message": "Tag responses updated."}
 
 
 class ModerationBot(commands.Bot):
@@ -686,6 +1064,7 @@ class ModerationBot(commands.Bot):
         self.web_thread: threading.Thread | None = None
         self.youtube_monitor_task: asyncio.Task | None = None
         self.web_channel_options: list[dict] = []
+        self.web_role_options: list[dict] = []
 
     async def sync_guild_commands(self, reason: str) -> None:
         expected = len(self.tree.get_commands(guild=self.guild_object))
@@ -709,6 +1088,11 @@ class ModerationBot(commands.Bot):
                 db_path=ACTION_DB_PATH,
                 get_bot_snapshot=self.get_web_snapshot,
                 get_notification_channels=self.get_web_channel_options,
+                get_discord_catalog=self.get_web_discord_catalog,
+                get_command_permissions=run_web_get_command_permissions,
+                save_command_permissions=run_web_update_command_permissions,
+                get_tag_responses=run_web_get_tag_responses,
+                save_tag_responses=run_web_save_tag_responses,
                 resolve_youtube_subscription=lambda source_url: resolve_youtube_subscription_seed(source_url),
                 host=WEB_BIND_HOST,
                 port=WEB_PORT,
@@ -727,6 +1111,7 @@ class ModerationBot(commands.Bot):
             )
             await self.sync_guild_commands(reason="ready-retry")
         self.web_channel_options = self.build_web_channel_options()
+        self.web_role_options = self.build_web_role_options()
         if not ENABLE_MEMBERS_INTENT:
             logger.info("ENABLE_MEMBERS_INTENT is disabled; no privileged members intent requested.")
         await log_action(
@@ -765,6 +1150,44 @@ class ModerationBot(commands.Bot):
 
     def get_web_channel_options(self) -> list[dict]:
         return list(self.web_channel_options)
+
+    def build_web_role_options(self) -> list[dict]:
+        guild = self.get_guild(GUILD_ID)
+        if guild is None:
+            return []
+        options: list[dict] = []
+        for role in sorted(guild.roles, key=lambda item: item.position, reverse=True):
+            if role.is_default():
+                continue
+            options.append({"id": role.id, "name": f"@{role.name}"})
+        return options
+
+    def get_web_discord_catalog(self) -> dict:
+        guild = self.get_guild(GUILD_ID)
+        if guild is None:
+            return {"ok": False, "error": "Guild not available."}
+        self.web_channel_options = self.build_web_channel_options()
+        self.web_role_options = self.build_web_role_options()
+        return {
+            "ok": True,
+            "guild": {"id": guild.id, "name": guild.name},
+            "channels": list(self.web_channel_options),
+            "roles": list(self.web_role_options),
+        }
+
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.bot:
+            return
+        if isinstance(message.author, discord.Member) and message.guild and message.guild.id == GUILD_ID:
+            content = (message.content or "").strip()
+            if content.startswith("!"):
+                tag_key = normalize_tag(content.split()[0])
+                if tag_key:
+                    tag_mapping = ACTION_STORE.get_tag_responses()
+                    response = tag_mapping.get(tag_key)
+                    if response and can_use_command(message.author, "tag"):
+                        await message.channel.send(response)
+        await self.process_commands(message)
 
     async def youtube_monitor_loop(self) -> None:
         await self.wait_until_ready()
@@ -930,8 +1353,19 @@ async def log_interaction(
     )
 
 
+async def ensure_interaction_command_access(interaction: discord.Interaction, command_key: str) -> bool:
+    if can_use_command(interaction.user, command_key):
+        return True
+    message = build_command_permission_denied_message(command_key, interaction.guild)
+    await reply_ephemeral(interaction, message)
+    await log_interaction(interaction, action="permission_denied", reason=f"{command_key}: {message}", success=False)
+    return False
+
+
 @bot.tree.command(name="ping", description="Check if the bot is online.", guild=discord.Object(id=GUILD_ID))
 async def ping(interaction: discord.Interaction) -> None:
+    if not await ensure_interaction_command_access(interaction, "ping"):
+        return
     await interaction.response.send_message(
         "WickedYoda's Little Helper is online.",
         ephemeral=COMMAND_RESPONSES_EPHEMERAL,
@@ -941,6 +1375,8 @@ async def ping(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(name="sayhi", description="Introduce the bot in the channel.", guild=discord.Object(id=GUILD_ID))
 async def sayhi(interaction: discord.Interaction) -> None:
+    if not await ensure_interaction_command_access(interaction, "sayhi"):
+        return
     intro = "Hi everyone, I am WickedYoda's Little Helper.\nI can help with moderation, URL short links, and uptime checks."
     await interaction.response.send_message(intro)
     await log_interaction(interaction, action="sayhi", reason="Posted channel introduction", success=True)
@@ -948,6 +1384,8 @@ async def sayhi(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(name="happy", description="Post a random puppy picture.", guild=discord.Object(id=GUILD_ID))
 async def happy(interaction: discord.Interaction) -> None:
+    if not await ensure_interaction_command_access(interaction, "happy"):
+        return
     await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
     try:
         image_url = await asyncio.to_thread(fetch_random_puppy_image_url)
@@ -980,6 +1418,8 @@ async def happy(interaction: discord.Interaction) -> None:
 @bot.tree.command(name="shorten", description="Create a short URL.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(url="URL to shorten using the configured shortener")
 async def shorten(interaction: discord.Interaction, url: str) -> None:
+    if not await ensure_interaction_command_access(interaction, "shorten"):
+        return
     if not SHORTENER_ENABLED:
         await reply_ephemeral(interaction, "Shortener integration is disabled.")
         await log_interaction(interaction, action="shorten", reason="shortener disabled", success=False)
@@ -1016,6 +1456,8 @@ async def shorten(interaction: discord.Interaction, url: str) -> None:
 @bot.tree.command(name="expand", description="Expand a short code or short URL.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(value="Short code (example: 1234) or full short URL")
 async def expand(interaction: discord.Interaction, value: str) -> None:
+    if not await ensure_interaction_command_access(interaction, "expand"):
+        return
     if not SHORTENER_ENABLED:
         await reply_ephemeral(interaction, "Shortener integration is disabled.")
         await log_interaction(interaction, action="expand", reason="shortener disabled", success=False)
@@ -1051,6 +1493,8 @@ async def expand(interaction: discord.Interaction, value: str) -> None:
 
 @bot.tree.command(name="uptime", description="Show current uptime monitor status.", guild=discord.Object(id=GUILD_ID))
 async def uptime(interaction: discord.Interaction) -> None:
+    if not await ensure_interaction_command_access(interaction, "uptime"):
+        return
     if not UPTIME_STATUS_ENABLED:
         await reply_ephemeral(interaction, "Uptime status integration is disabled.")
         await log_interaction(interaction, action="uptime", reason="uptime integration disabled", success=False)
@@ -1076,6 +1520,51 @@ async def uptime(interaction: discord.Interaction) -> None:
         await log_interaction(interaction, action="uptime", reason=truncate_log_text(str(exc)), success=False)
 
 
+@bot.tree.command(name="help", description="Show available bot features.", guild=discord.Object(id=GUILD_ID))
+async def help_command(interaction: discord.Interaction) -> None:
+    if not await ensure_interaction_command_access(interaction, "help"):
+        return
+    message = (
+        "**WickedYoda's Little Helper**\n"
+        "General: `/ping`, `/sayhi`, `/happy`, `/help`\n"
+        "Utilities: `/shorten`, `/expand`, `/uptime`\n"
+        "Tags: `/tags`, `/tag <name>`, message tags like `!rules`\n"
+        "Moderation: `/kick`, `/ban`, `/timeout`, `/untimeout`, `/purge`, `/unban`, `/addrole`, `/removerole`\n"
+        "Use the web admin panel for settings, users, logs, wiki, command permissions, and tag responses."
+    )
+    await interaction.response.send_message(message, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+    await log_interaction(interaction, action="help", success=True)
+
+
+@bot.tree.command(name="tags", description="List configured tags.", guild=discord.Object(id=GUILD_ID))
+async def tags(interaction: discord.Interaction) -> None:
+    if not await ensure_interaction_command_access(interaction, "tags"):
+        return
+    mapping = ACTION_STORE.get_tag_responses()
+    if not mapping:
+        await reply_ephemeral(interaction, "No tags are configured.")
+        await log_interaction(interaction, action="tags", reason="no tags configured", success=False)
+        return
+    tag_list = ", ".join(sorted(mapping.keys()))
+    await reply_ephemeral(interaction, f"Configured tags: {tag_list}")
+    await log_interaction(interaction, action="tags", reason=truncate_log_text(tag_list), success=True)
+
+
+@bot.tree.command(name="tag", description="Post a configured tag response.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(name="Tag name (with or without !)")
+async def tag(interaction: discord.Interaction, name: str) -> None:
+    if not await ensure_interaction_command_access(interaction, "tag"):
+        return
+    tag_key = normalize_tag(name)
+    mapping = ACTION_STORE.get_tag_responses()
+    if not tag_key or tag_key not in mapping:
+        await reply_ephemeral(interaction, "Tag not found. Use `/tags` to list available tags.")
+        await log_interaction(interaction, action="tag", reason=f"missing tag: {name}", success=False)
+        return
+    await interaction.response.send_message(mapping[tag_key], ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+    await log_interaction(interaction, action="tag", reason=tag_key, success=True)
+
+
 @bot.tree.command(name="kick", description="Kick a member from the server.", guild=discord.Object(id=GUILD_ID))
 @app_commands.checks.has_permissions(kick_members=True)
 @app_commands.describe(member="Member to kick", reason="Reason for the kick")
@@ -1084,6 +1573,8 @@ async def kick(
     member: discord.Member,
     reason: str | None = "No reason provided",
 ) -> None:
+    if not await ensure_interaction_command_access(interaction, "kick"):
+        return
     try:
         await member.kick(reason=reason)
         await reply_ephemeral(interaction, f"Kicked {member.mention}.")
@@ -1102,6 +1593,8 @@ async def ban(
     reason: str | None = "No reason provided",
     delete_days: app_commands.Range[int, 0, 7] = 0,
 ) -> None:
+    if not await ensure_interaction_command_access(interaction, "ban"):
+        return
     try:
         if interaction.guild is None:
             await reply_ephemeral(interaction, "This command can only be used in a server.")
@@ -1128,6 +1621,8 @@ async def timeout(
     minutes: app_commands.Range[int, 1, 40320],
     reason: str | None = "No reason provided",
 ) -> None:
+    if not await ensure_interaction_command_access(interaction, "timeout"):
+        return
     try:
         until = discord.utils.utcnow() + timedelta(minutes=minutes)
         await member.edit(timed_out_until=until, reason=reason)
@@ -1146,6 +1641,8 @@ async def untimeout(
     member: discord.Member,
     reason: str | None = "No reason provided",
 ) -> None:
+    if not await ensure_interaction_command_access(interaction, "untimeout"):
+        return
     try:
         await member.edit(timed_out_until=None, reason=reason)
         await reply_ephemeral(interaction, f"Removed timeout for {member.mention}.")
@@ -1159,6 +1656,8 @@ async def untimeout(
 @app_commands.checks.has_permissions(manage_messages=True)
 @app_commands.describe(amount="Number of messages to delete (1-100)")
 async def purge(interaction: discord.Interaction, amount: app_commands.Range[int, 1, 100]) -> None:
+    if not await ensure_interaction_command_access(interaction, "purge"):
+        return
     if interaction.channel is None:
         await reply_ephemeral(interaction, "This command can only be used in a server channel.")
         await log_interaction(interaction, action="purge", reason="No channel context", success=False)
@@ -1177,11 +1676,127 @@ async def purge(interaction: discord.Interaction, amount: app_commands.Range[int
         await log_interaction(interaction, action="purge", reason=str(exc), success=False)
 
 
+@bot.tree.command(name="unban", description="Unban a member by user ID.", guild=discord.Object(id=GUILD_ID))
+@app_commands.checks.has_permissions(ban_members=True)
+@app_commands.describe(user_id="User ID to unban", reason="Reason for unban")
+async def unban(interaction: discord.Interaction, user_id: str, reason: str | None = "No reason provided") -> None:
+    if not await ensure_interaction_command_access(interaction, "unban"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        await log_interaction(interaction, action="unban", reason="No guild context", success=False)
+        return
+    target_user_id = parse_user_id_input(user_id)
+    if target_user_id is None:
+        await reply_ephemeral(interaction, "Invalid user ID.")
+        await log_interaction(interaction, action="unban", reason=f"invalid id: {user_id}", success=False)
+        return
+    try:
+        await interaction.guild.unban(discord.Object(id=target_user_id), reason=reason)
+        await reply_ephemeral(interaction, f"Unbanned user ID `{target_user_id}`.")
+        await log_interaction(interaction, action="unban", reason=f"{target_user_id}: {reason}", success=True)
+    except discord.NotFound:
+        await reply_ephemeral(interaction, f"User `{target_user_id}` is not currently banned.")
+        await log_interaction(interaction, action="unban", reason=f"not banned: {target_user_id}", success=False)
+    except Exception as exc:
+        await reply_ephemeral(interaction, f"Failed to unban user: {exc}")
+        await log_interaction(interaction, action="unban", reason=f"{target_user_id}: {exc}", success=False)
+
+
+@bot.tree.command(name="addrole", description="Add a role to a member.", guild=discord.Object(id=GUILD_ID))
+@app_commands.checks.has_permissions(manage_roles=True)
+@app_commands.describe(member="Member to update", role="Role to add", reason="Reason for role assignment")
+async def addrole(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    role: discord.Role,
+    reason: str | None = "No reason provided",
+) -> None:
+    if not await ensure_interaction_command_access(interaction, "addrole"):
+        return
+    if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        await log_interaction(interaction, action="addrole", reason="No guild/member context", success=False)
+        return
+    bot_member = interaction.guild.me or interaction.guild.get_member(bot.user.id if bot.user else 0)
+    if bot_member is None:
+        await reply_ephemeral(interaction, "Could not resolve bot member in this guild.")
+        await log_interaction(interaction, action="addrole", target=member, reason="bot member missing", success=False)
+        return
+    can_target, target_error = validate_moderation_target(interaction.user, member, bot_member)
+    if not can_target:
+        await reply_ephemeral(interaction, str(target_error))
+        await log_interaction(interaction, action="addrole", target=member, reason=target_error, success=False)
+        return
+    can_manage, role_error = validate_manageable_role(interaction.user, role, bot_member)
+    if not can_manage:
+        await reply_ephemeral(interaction, str(role_error))
+        await log_interaction(interaction, action="addrole", target=member, reason=role_error, success=False)
+        return
+    if role in member.roles:
+        await reply_ephemeral(interaction, f"{member.mention} already has {role.mention}.")
+        await log_interaction(interaction, action="addrole", target=member, reason="already has role", success=False)
+        return
+    try:
+        await member.add_roles(role, reason=reason)
+        await reply_ephemeral(interaction, f"Added {role.mention} to {member.mention}.")
+        await log_interaction(interaction, action="addrole", target=member, reason=f"{role.id}: {reason}", success=True)
+    except Exception as exc:
+        await reply_ephemeral(interaction, f"Failed to add role: {exc}")
+        await log_interaction(interaction, action="addrole", target=member, reason=str(exc), success=False)
+
+
+@bot.tree.command(name="removerole", description="Remove a role from a member.", guild=discord.Object(id=GUILD_ID))
+@app_commands.checks.has_permissions(manage_roles=True)
+@app_commands.describe(member="Member to update", role="Role to remove", reason="Reason for role removal")
+async def removerole(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    role: discord.Role,
+    reason: str | None = "No reason provided",
+) -> None:
+    if not await ensure_interaction_command_access(interaction, "removerole"):
+        return
+    if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        await log_interaction(interaction, action="removerole", reason="No guild/member context", success=False)
+        return
+    bot_member = interaction.guild.me or interaction.guild.get_member(bot.user.id if bot.user else 0)
+    if bot_member is None:
+        await reply_ephemeral(interaction, "Could not resolve bot member in this guild.")
+        await log_interaction(interaction, action="removerole", target=member, reason="bot member missing", success=False)
+        return
+    can_target, target_error = validate_moderation_target(interaction.user, member, bot_member)
+    if not can_target:
+        await reply_ephemeral(interaction, str(target_error))
+        await log_interaction(interaction, action="removerole", target=member, reason=target_error, success=False)
+        return
+    can_manage, role_error = validate_manageable_role(interaction.user, role, bot_member)
+    if not can_manage:
+        await reply_ephemeral(interaction, str(role_error))
+        await log_interaction(interaction, action="removerole", target=member, reason=role_error, success=False)
+        return
+    if role not in member.roles:
+        await reply_ephemeral(interaction, f"{member.mention} does not currently have {role.mention}.")
+        await log_interaction(interaction, action="removerole", target=member, reason="role not assigned", success=False)
+        return
+    try:
+        await member.remove_roles(role, reason=reason)
+        await reply_ephemeral(interaction, f"Removed {role.mention} from {member.mention}.")
+        await log_interaction(interaction, action="removerole", target=member, reason=f"{role.id}: {reason}", success=True)
+    except Exception as exc:
+        await reply_ephemeral(interaction, f"Failed to remove role: {exc}")
+        await log_interaction(interaction, action="removerole", target=member, reason=str(exc), success=False)
+
+
 @kick.error
 @ban.error
 @timeout.error
 @untimeout.error
 @purge.error
+@unban.error
+@addrole.error
+@removerole.error
 async def command_permission_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
     if isinstance(error, app_commands.MissingPermissions):
         await reply_ephemeral(interaction, "You do not have permission to use this command.")

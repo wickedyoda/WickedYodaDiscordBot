@@ -51,6 +51,9 @@ Set these in `env.env`:
 - `/ping`
 - `/sayhi`
 - `/happy`
+- `/help`
+- `/tags`
+- `/tag`
 - `/shorten`
 - `/expand`
 - `/uptime`
@@ -59,6 +62,9 @@ Set these in `env.env`:
 - `/timeout`
 - `/untimeout`
 - `/purge`
+- `/unban`
+- `/addrole`
+- `/removerole`
 
 Detailed command behavior, parameters, and permission requirements are documented in [`wiki/Command-Reference.md`](wiki/Command-Reference.md).
 
@@ -79,6 +85,8 @@ SQLite storage is internal to the container at `/app/data/mod_actions.db`.
   - Wiki viewer (`/admin/wiki`)
   - Account password management (`/admin/account`)
   - User management (`/admin/users`, admin only)
+  - Command permissions (`/admin/command-permissions`, admin only)
+  - Tag responses (`/admin/tag-responses`, admin only)
   - Runtime settings editor (`/admin/settings`, admin only)
 
 The GUI is built with responsive Bootstrap layout for mobile and desktop.
