@@ -4,18 +4,35 @@ This folder contains internal project wiki docs for bot operations and command b
 
 ## Pages
 
-- [Command Reference](./Command-Reference.md) - all active slash commands and permission requirements.
-- Web Admin GUI (implemented in `web_admin.py`):
-  - Dashboard: `/admin`
-  - Actions: `/admin/actions`
-  - YouTube subscriptions: `/admin/youtube`
-  - Logs: `/admin/logs`
-  - Wiki: `/admin/wiki`
-  - Account: `/admin/account`
-  - Users (admin only): `/admin/users`
-  - Command Permissions (admin only): `/admin/command-permissions`
-  - Tag Responses (admin only): `/admin/tag-responses`
-  - Settings editor (admin only): `/admin/settings`
+- [Command Reference](./Command-Reference.md) - active slash commands, parameters, and permission behavior.
+- [Multi-Guild and Env Setup](./Multi-Guild-and-Env.md) - required/optional env vars and multi-guild startup patterns.
+- [Web Admin Interface](./Web-Admin-Interface.md) - web GUI auth, pages, security controls, and operational notes.
+
+## Web Admin Routes
+
+- Public health and status:
+  - `/healthz`
+  - `/status`
+  - `/status/everything`
+- Login/session:
+  - `/login`
+  - `/logout`
+- Core admin:
+  - `/admin`
+  - `/admin/actions`
+  - `/admin/youtube`
+  - `/admin/logs`
+  - `/admin/wiki`
+  - `/admin/account`
+- Admin-only:
+  - `/admin/users`
+  - `/admin/command-permissions`
+  - `/admin/tag-responses`
+  - `/admin/guild-settings`
+  - `/admin/settings`
+  - `/admin/observability`
+  - `/admin/bot-profile`
+  - `/admin/restart` (only when `WEB_RESTART_ENABLED=true`)
 
 ## Maintenance Rule
 

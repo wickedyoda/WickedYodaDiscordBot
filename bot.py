@@ -33,6 +33,18 @@ def required_env(name: str) -> str:
     return value
 
 
+def optional_positive_int_env(name: str) -> int | None:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return None
+    if not value.isdigit():
+        raise RuntimeError(f"Environment variable {name} must be a positive integer if provided.")
+    parsed = int(value)
+    if parsed <= 0:
+        raise RuntimeError(f"Environment variable {name} must be a positive integer if provided.")
+    return parsed
+
+
 def env_bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -51,8 +63,6 @@ def env_int(name: str, default: int) -> int:
 
 
 DISCORD_TOKEN = required_env("DISCORD_TOKEN")
-GUILD_ID = int(required_env("GUILD_ID"))
-BOT_LOG_CHANNEL = int(required_env("Bot_Log_Channel"))
 MANAGED_GUILD_IDS_RAW = os.getenv("MANAGED_GUILD_IDS", "").strip()
 
 DATA_DIR = os.getenv("DATA_DIR", "/app/data")
@@ -80,10 +90,31 @@ if MANAGED_GUILD_IDS_RAW:
             continue
         if not part.isdigit():
             raise RuntimeError("MANAGED_GUILD_IDS must contain only numeric guild IDs.")
-        parsed_guild_ids.add(int(part))
+        guild_id_value = int(part)
+        if guild_id_value <= 0:
+            raise RuntimeError("MANAGED_GUILD_IDS must contain only positive guild IDs.")
+        parsed_guild_ids.add(guild_id_value)
     MANAGED_GUILD_IDS: set[int] | None = parsed_guild_ids if parsed_guild_ids else None
 else:
     MANAGED_GUILD_IDS = None
+
+GUILD_ID_CONFIGURED = optional_positive_int_env("GUILD_ID")
+if GUILD_ID_CONFIGURED is not None:
+    GUILD_ID = GUILD_ID_CONFIGURED
+elif MANAGED_GUILD_IDS:
+    GUILD_ID = sorted(MANAGED_GUILD_IDS)[0]
+else:
+    GUILD_ID = 0
+    logger.warning(
+        "GUILD_ID is not set and MANAGED_GUILD_IDS is empty. Multi-guild mode will activate after guild discovery."
+    )
+
+BOT_LOG_CHANNEL_CONFIGURED = optional_positive_int_env("Bot_Log_Channel")
+BOT_LOG_CHANNEL = BOT_LOG_CHANNEL_CONFIGURED or 0
+if BOT_LOG_CHANNEL <= 0:
+    logger.warning(
+        "Bot_Log_Channel is not set. Configure per-guild bot log channels in /admin/guild-settings or set Bot_Log_Channel in env."
+    )
 
 SHORT_CODE_REGEX = re.compile(r"Link saved:\s*([0-9]{4,})")
 STATUS_PAGE_PATH_REGEX = re.compile(r"^/status/([^/]+)/?$")
@@ -846,23 +877,35 @@ class ActionStore:
             existing_tags = conn.execute("SELECT COUNT(*) FROM tag_responses").fetchone()[0]
             if int(existing_tags) == 0:
                 now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
-                for tag, response in DEFAULT_TAG_RESPONSES.items():
-                    conn.execute(
-                        """
-                        INSERT INTO tag_responses (tag, response, updated_at)
-                        VALUES (?, ?, ?)
-                        """,
-                        (f"{GUILD_ID}:{tag}", response, now),
-                    )
-            existing_guild_setting = conn.execute("SELECT COUNT(*) FROM guild_settings WHERE guild_id = ?", (GUILD_ID,)).fetchone()[0]
-            if int(existing_guild_setting) == 0:
-                conn.execute(
-                    """
-                    INSERT INTO guild_settings (guild_id, bot_log_channel_id, updated_at)
-                    VALUES (?, ?, ?)
-                    """,
-                    (GUILD_ID, BOT_LOG_CHANNEL, datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")),
-                )
+                if GUILD_ID_CONFIGURED is not None and GUILD_ID_CONFIGURED > 0:
+                    for tag, response in DEFAULT_TAG_RESPONSES.items():
+                        conn.execute(
+                            """
+                            INSERT INTO tag_responses (tag, response, updated_at)
+                            VALUES (?, ?, ?)
+                            """,
+                            (f"{GUILD_ID_CONFIGURED}:{tag}", response, now),
+                        )
+            now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+            guild_settings_ids: set[int] = set()
+            if GUILD_ID_CONFIGURED is not None:
+                guild_settings_ids.add(GUILD_ID_CONFIGURED)
+            if MANAGED_GUILD_IDS:
+                guild_settings_ids.update(MANAGED_GUILD_IDS)
+            if BOT_LOG_CHANNEL > 0:
+                for guild_id in sorted(guild_settings_ids):
+                    existing_guild_setting = conn.execute(
+                        "SELECT COUNT(*) FROM guild_settings WHERE guild_id = ?",
+                        (guild_id,),
+                    ).fetchone()[0]
+                    if int(existing_guild_setting) == 0:
+                        conn.execute(
+                            """
+                            INSERT INTO guild_settings (guild_id, bot_log_channel_id, updated_at)
+                            VALUES (?, ?, ?)
+                            """,
+                            (guild_id, BOT_LOG_CHANNEL, now),
+                        )
             conn.commit()
 
     def record(
@@ -943,7 +986,7 @@ class ActionStore:
                 command_key = command_key.removeprefix(prefix)
             elif ":" in command_key:
                 continue
-            elif int(guild_id) != GUILD_ID:
+            elif GUILD_ID_CONFIGURED is None or int(guild_id) != GUILD_ID_CONFIGURED:
                 continue
             if command_key not in COMMAND_PERMISSION_METADATA:
                 continue
@@ -955,7 +998,7 @@ class ActionStore:
             mapping[command_key] = normalize_command_permission_rule({"mode": row["mode"], "role_ids": parsed_role_ids})
         if found_prefixed:
             return mapping
-        if int(guild_id) == GUILD_ID:
+        if GUILD_ID_CONFIGURED is not None and int(guild_id) == GUILD_ID_CONFIGURED:
             return mapping
         return {}
 
@@ -1002,7 +1045,7 @@ class ActionStore:
                 raw_tag = raw_tag.removeprefix(prefix)
             elif ":" in raw_tag:
                 continue
-            elif int(guild_id) != GUILD_ID:
+            elif GUILD_ID_CONFIGURED is None or int(guild_id) != GUILD_ID_CONFIGURED:
                 continue
             tag = normalize_tag(raw_tag)
             if not tag:
@@ -1012,7 +1055,7 @@ class ActionStore:
                 mapping[tag] = response
         if found_prefixed:
             return mapping
-        if int(guild_id) == GUILD_ID and mapping:
+        if GUILD_ID_CONFIGURED is not None and int(guild_id) == GUILD_ID_CONFIGURED and mapping:
             return mapping
         return dict(DEFAULT_TAG_RESPONSES)
 
@@ -1693,6 +1736,8 @@ def resolve_bot_log_channel_id(guild_id: int | None = None) -> int:
 
 async def get_log_channel(client: commands.Bot, guild_id: int | None = None) -> discord.TextChannel | None:
     channel_id = resolve_bot_log_channel_id(guild_id=guild_id)
+    if channel_id <= 0:
+        return None
     channel = await get_text_channel(client, channel_id)
     if isinstance(channel, discord.TextChannel):
         if guild_id is None or channel.guild.id == guild_id:

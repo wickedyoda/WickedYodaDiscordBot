@@ -8,6 +8,8 @@ Project wiki files live in [`wiki/`](wiki/).
 
 - [`wiki/Home.md`](wiki/Home.md) - wiki index and maintenance workflow
 - [`wiki/Command-Reference.md`](wiki/Command-Reference.md) - full slash command documentation
+- [`wiki/Multi-Guild-and-Env.md`](wiki/Multi-Guild-and-Env.md) - multi-guild behavior and environment variable patterns
+- [`wiki/Web-Admin-Interface.md`](wiki/Web-Admin-Interface.md) - web GUI authentication, pages, and security controls
 
 When adding or changing a bot command, update `wiki/Command-Reference.md` in the same pull request.
 
@@ -16,9 +18,9 @@ When adding or changing a bot command, update `wiki/Command-Reference.md` in the
 Set these in `env.env`:
 
 - `DISCORD_TOKEN` - your bot token
-- `GUILD_ID` - your Discord server (guild) ID
+- `GUILD_ID` - optional default guild ID (needed for legacy single-guild defaults; can be omitted in multi-guild mode)
 - `MANAGED_GUILD_IDS` - optional comma-separated guild IDs to manage/sync (defaults to all guilds the bot is in)
-- `Bot_Log_Channel` - default text channel ID where bot action logs are posted (can be overridden per guild in web GUI)
+- `Bot_Log_Channel` - optional default text channel ID for bot action logs (can be overridden per guild in web GUI)
 - `WEB_ENABLED` - enable web GUI (`true`/`false`)
 - `WEB_BIND_HOST` - web server bind host (use `0.0.0.0` in Docker)
 - `WEB_PORT` - web GUI port inside container
@@ -51,6 +53,23 @@ Set these in `env.env`:
 - `WEB_ENV_FILE` - optional path to env file used by web GUI settings editor (default: `./env.env`)
 - `WEB_GITHUB_WIKI_URL` - optional external wiki URL button in the web GUI Wiki page
 
+### Multi-Guild Startup Notes
+
+- Minimum required variable is `DISCORD_TOKEN`.
+- `MANAGED_GUILD_IDS` is recommended for controlled multi-guild operation.
+- `GUILD_ID` is optional; keep it only for legacy/single-guild defaults.
+- `Bot_Log_Channel` is optional when you configure per-guild log channels in `/admin/guild-settings`.
+
+Example multi-guild config:
+
+```env
+DISCORD_TOKEN=your-token
+MANAGED_GUILD_IDS=111111111111111111,222222222222222222
+WEB_ENABLED=true
+WEB_BIND_HOST=0.0.0.0
+WEB_PORT=8080
+```
+
 ## Included Slash Commands
 
 - `/ping`
@@ -74,7 +93,7 @@ Set these in `env.env`:
 
 Detailed command behavior, parameters, and permission requirements are documented in [`wiki/Command-Reference.md`](wiki/Command-Reference.md).
 
-All command actions (success/failure) are logged to `Bot_Log_Channel`.
+All command actions (success/failure) are logged to per-guild configured log channel, or `Bot_Log_Channel` when set.
 All actions are also written to SQLite and visible in the web GUI.
 
 SQLite storage is internal to the container at `/app/data/mod_actions.db`.

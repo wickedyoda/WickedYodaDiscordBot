@@ -14,8 +14,9 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
 - Parameters: none
 - Required user permissions: none
 - Bot action:
-  - Replies with `WickedYoda's Little Helper is online.` (ephemeral).
-  - Logs success to `Bot_Log_Channel` and SQLite action history.
+  - Replies with `WickedYoda's Little Helper is online.`.
+  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
+  - Logs success to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/sayhi`
 
@@ -24,7 +25,8 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
 - Required user permissions: none
 - Bot action:
   - Posts a public introduction message in the channel.
-  - Logs success to `Bot_Log_Channel` and SQLite action history.
+  - This response is intentionally non-ephemeral so everyone in the channel can see it.
+  - Logs success to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/happy`
 
@@ -35,7 +37,7 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
   - Fetches a random dog image URL from `PUPPY_IMAGE_API_URL`.
   - Sends an embed with the image.
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/shorten`
 
@@ -48,7 +50,7 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
   - Sends URL to `SHORTENER_BASE_URL` via Shortipy form POST.
   - Replies with generated short URL.
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/expand`
 
@@ -61,7 +63,7 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
   - Requests short URL and reads redirect target.
   - Replies with expanded destination URL.
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/uptime`
 
@@ -73,7 +75,7 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
   - Summarizes monitor counts (`Up`, `Down`, `Pending`, `Maintenance`, `Unknown`).
   - Includes a short list of currently down monitors.
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/logs`
 
@@ -85,7 +87,7 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
   - Reads latest lines from runtime error log file.
   - Sends inline code block when short enough, otherwise sends as a file attachment.
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/help`
 
@@ -95,7 +97,7 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
 - Bot action:
   - Sends a quick reference summary.
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
-  - Logs action to `Bot_Log_Channel` and SQLite.
+  - Logs action to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite.
 
 ## `/tags`
 
@@ -105,7 +107,7 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
 - Bot action:
   - Lists currently configured tag keys.
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
-  - Logs action to `Bot_Log_Channel` and SQLite.
+  - Logs action to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite.
 
 ## `/tag`
 
@@ -116,7 +118,7 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
 - Bot action:
   - Sends configured tag response if found.
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite.
 
 Message tags are also supported for `!tag` style messages when message content intent is available.
 
@@ -130,7 +132,7 @@ Message tags are also supported for `!tag` style messages when message content i
 - Bot action:
   - Attempts to kick target member.
   - Replies ephemerally with success or failure.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/ban`
 
@@ -144,7 +146,7 @@ Message tags are also supported for `!tag` style messages when message content i
   - Validates command is run in guild context.
   - Bans member and converts `delete_days` to seconds for Discord API.
   - Replies ephemerally with success or failure.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/timeout`
 
@@ -157,7 +159,7 @@ Message tags are also supported for `!tag` style messages when message content i
 - Bot action:
   - Sets timeout expiration (`now + minutes`).
   - Replies ephemerally with success or failure.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/untimeout`
 
@@ -169,7 +171,7 @@ Message tags are also supported for `!tag` style messages when message content i
 - Bot action:
   - Clears member timeout.
   - Replies ephemerally with success or failure.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/purge`
 
@@ -180,7 +182,7 @@ Message tags are also supported for `!tag` style messages when message content i
 - Bot action:
   - Validates command is run in a channel context.
   - Defers response, purges messages, sends ephemeral count deleted.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/unban`
 
@@ -192,7 +194,7 @@ Message tags are also supported for `!tag` style messages when message content i
 - Bot action:
   - Attempts unban by ID.
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/addrole`
 
@@ -206,7 +208,7 @@ Message tags are also supported for `!tag` style messages when message content i
   - Validates member/role hierarchy constraints.
   - Adds role on success.
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## `/removerole`
 
@@ -220,7 +222,7 @@ Message tags are also supported for `!tag` style messages when message content i
   - Validates member/role hierarchy constraints.
   - Removes role on success.
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
-  - Logs success/failure to `Bot_Log_Channel` and SQLite action history.
+  - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
 ## Shared Error Behavior
 
