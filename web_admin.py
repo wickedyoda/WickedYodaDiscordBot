@@ -235,21 +235,22 @@ def _delete_youtube_subscription(db_path: str, subscription_id: int) -> bool:
 
 def _fetch_counts(db_path: str, guild_id: int | None = None) -> dict:
     _ensure_actions_table(db_path)
-    where_clause = ""
-    params: tuple = ()
-    if guild_id is not None:
-        where_clause = " WHERE guild = ?"
-        params = (str(guild_id),)
     with sqlite3.connect(db_path) as conn:
-        total = conn.execute(f"SELECT COUNT(*) FROM actions{where_clause}", params).fetchone()[0]
-        success = conn.execute(
-            f"SELECT COUNT(*) FROM actions{where_clause}{' AND' if where_clause else ' WHERE'} status='success'",
-            params,
-        ).fetchone()[0]
-        failed = conn.execute(
-            f"SELECT COUNT(*) FROM actions{where_clause}{' AND' if where_clause else ' WHERE'} status='failed'",
-            params,
-        ).fetchone()[0]
+        if guild_id is None:
+            total = conn.execute("SELECT COUNT(*) FROM actions").fetchone()[0]
+            success = conn.execute("SELECT COUNT(*) FROM actions WHERE status = ?", ("success",)).fetchone()[0]
+            failed = conn.execute("SELECT COUNT(*) FROM actions WHERE status = ?", ("failed",)).fetchone()[0]
+        else:
+            guild_value = str(guild_id)
+            total = conn.execute("SELECT COUNT(*) FROM actions WHERE guild = ?", (guild_value,)).fetchone()[0]
+            success = conn.execute(
+                "SELECT COUNT(*) FROM actions WHERE guild = ? AND status = ?",
+                (guild_value, "success"),
+            ).fetchone()[0]
+            failed = conn.execute(
+                "SELECT COUNT(*) FROM actions WHERE guild = ? AND status = ?",
+                (guild_value, "failed"),
+            ).fetchone()[0]
     return {
         "total": total,
         "success": success,
