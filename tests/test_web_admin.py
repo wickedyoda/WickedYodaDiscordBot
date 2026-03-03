@@ -104,7 +104,7 @@ def test_admin_redirects_to_login_when_not_authenticated(tmp_path: Path, monkeyp
     assert "/login" in response.headers["Location"]
 
 
-def test_login_and_dashboard_access(tmp_path: Path, monkeypatch) -> None:
+def test_login_and_home_access(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
     monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
     app = create_app(str(tmp_path / "actions.db"), _bot_snapshot)
@@ -112,7 +112,7 @@ def test_login_and_dashboard_access(tmp_path: Path, monkeypatch) -> None:
     response = client.post("/login", data={"username": "admin@example.com", "password": "TestPass123!"}, follow_redirects=True)
 
     assert response.status_code == 200
-    assert b"Latest Actions" in response.data
+    assert b"Control Center" in response.data
 
 
 def test_login_allows_forwarded_host_origin_match(tmp_path: Path, monkeypatch) -> None:
@@ -270,7 +270,7 @@ def test_settings_save_updates_env_file(tmp_path: Path, monkeypatch) -> None:
     response = client.post(
         "/admin/settings/save",
         data={"WEB_PORT": "8000", "DISCORD_TOKEN": "********"},
-        headers={"X-CSRF-Token": csrf_token},
+        headers={"X-CSRF-Token": csrf_token, "Origin": "http://not-the-same-origin.example"},
         follow_redirects=True,
     )
 
@@ -400,3 +400,147 @@ def test_command_permissions_and_tag_pages_render(tmp_path: Path, monkeypatch) -
     assert b"Command Permissions" in permissions_response.data
     assert tags_response.status_code == 200
     assert b"Tag Responses" in tags_response.data
+
+
+def test_home_dashboard_and_status_are_distinct(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+    app = create_app(str(tmp_path / "actions.db"), _bot_snapshot)
+    client = app.test_client()
+    _login(client)
+
+    home_response = client.get("/admin/home")
+    dashboard_response = client.get("/admin")
+    status_response = client.get("/admin/status")
+
+    assert home_response.status_code == 200
+    assert b"Control Center" in home_response.data
+    assert dashboard_response.status_code == 200
+    assert b"Latest Actions" in dashboard_response.data
+    assert status_response.status_code == 200
+    assert b"Service Status" in status_response.data
+    assert b"Status Log Tail" in status_response.data
+
+
+def test_logs_fall_back_to_db_directory_when_configured_log_dir_invalid(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+    invalid_log_dir = tmp_path / "not-a-directory"
+    invalid_log_dir.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("LOG_DIR", str(invalid_log_dir))
+    (tmp_path / "bot.log").write_text("fallback bot log line\n", encoding="utf-8")
+
+    app = create_app(str(tmp_path / "actions.db"), _bot_snapshot)
+    client = app.test_client()
+    _login(client)
+
+    response = client.get("/admin/logs?log=bot.log")
+
+    assert response.status_code == 200
+    assert b"fallback bot log line" in response.data
+
+
+def test_command_permissions_save_not_blocked_by_same_origin_policy(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+
+    def get_command_permissions(_guild_id: int) -> dict:
+        return {
+            "ok": True,
+            "commands": [
+                {
+                    "key": "ping",
+                    "label": "/ping",
+                    "description": "Health check",
+                    "default_policy_label": "Public (all members)",
+                    "mode": "default",
+                    "role_ids": [],
+                }
+            ],
+        }
+
+    def save_command_permissions(_payload: dict, _actor: str, guild_id: int) -> dict:
+        return get_command_permissions(guild_id) | {"message": "Command permissions updated.", "ok": True}
+
+    app = create_app(
+        str(tmp_path / "actions.db"),
+        _bot_snapshot,
+        get_command_permissions=get_command_permissions,
+        save_command_permissions=save_command_permissions,
+    )
+    client = app.test_client()
+    csrf_token = _login(client)
+
+    response = client.post(
+        "/admin/command-permissions",
+        data={"command_key": "ping", "mode__ping": "public", "role_ids_text__ping": ""},
+        headers={"X-CSRF-Token": csrf_token, "Origin": "http://not-the-same-origin.example"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Command permissions updated." in response.data
+
+
+def test_tag_responses_save_not_blocked_by_same_origin_policy(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+
+    def get_tag_responses(_guild_id: int) -> dict:
+        return {"ok": True, "mapping": {"hello": "world"}}
+
+    def save_tag_responses(mapping: dict, _actor: str, _guild_id: int) -> dict:
+        return {"ok": True, "mapping": mapping, "message": "Tag responses updated."}
+
+    app = create_app(
+        str(tmp_path / "actions.db"),
+        _bot_snapshot,
+        get_tag_responses=get_tag_responses,
+        save_tag_responses=save_tag_responses,
+    )
+    client = app.test_client()
+    csrf_token = _login(client)
+
+    response = client.post(
+        "/admin/tag-responses",
+        data={"tag_json": '{"hello": "updated"}'},
+        headers={"X-CSRF-Token": csrf_token, "Origin": "http://not-the-same-origin.example"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Tag responses updated." in response.data
+
+
+def test_guild_settings_save_not_blocked_by_same_origin_policy(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+
+    def get_discord_catalog(_guild_id: int) -> dict:
+        return {"ok": True, "channels": [{"id": 111222333444555666, "name": "#bot-logs"}]}
+
+    def get_guild_settings(_guild_id: int) -> dict:
+        return {"ok": True, "bot_log_channel_id": ""}
+
+    def save_guild_settings(_payload: dict, _actor: str, _guild_id: int) -> dict:
+        return {"ok": True, "bot_log_channel_id": 111222333444555666, "message": "Guild settings updated."}
+
+    app = create_app(
+        str(tmp_path / "actions.db"),
+        _bot_snapshot,
+        get_discord_catalog=get_discord_catalog,
+        get_guild_settings=get_guild_settings,
+        save_guild_settings=save_guild_settings,
+    )
+    client = app.test_client()
+    csrf_token = _login(client)
+
+    response = client.post(
+        "/admin/guild-settings",
+        data={"bot_log_channel_id": "111222333444555666"},
+        headers={"X-CSRF-Token": csrf_token, "Origin": "http://not-the-same-origin.example"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Guild settings updated." in response.data
