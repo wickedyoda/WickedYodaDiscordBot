@@ -115,7 +115,7 @@ elif MANAGED_GUILD_IDS:
     GUILD_ID = sorted(MANAGED_GUILD_IDS)[0]
 else:
     GUILD_ID = 0
-    logger.warning("GUILD_ID is not set and MANAGED_GUILD_IDS is empty. Multi-guild mode will activate after guild discovery.")
+    logger.info("GUILD_ID is not set and MANAGED_GUILD_IDS is empty. Multi-guild mode will activate after guild discovery.")
 
 BOT_LOG_CHANNEL_CONFIGURED = optional_positive_int_env("Bot_Log_Channel")
 BOT_LOG_CHANNEL = BOT_LOG_CHANNEL_CONFIGURED or 0
@@ -125,6 +125,8 @@ if BOT_LOG_CHANNEL <= 0:
     )
 INVALID_BOT_LOG_CHANNEL_CACHE: set[tuple[int | None, int]] = set()
 WARNED_INVALID_BOT_LOG_CHANNEL_CACHE: set[tuple[int | None, int]] = set()
+BOT_LOG_SEND_MAX_ATTEMPTS = 3
+BOT_LOG_SEND_RETRY_DELAY_SECONDS = 2
 
 SHORT_CODE_REGEX = re.compile(r"Link saved:\s*([0-9]{4,})")
 STATUS_PAGE_PATH_REGEX = re.compile(r"^/status/([^/]+)/?$")
@@ -1802,14 +1804,42 @@ async def log_action(client: commands.Bot, title: str, description: str, color: 
             cache_key = (guild_id, resolved_channel_id)
             if cache_key in INVALID_BOT_LOG_CHANNEL_CACHE and cache_key not in WARNED_INVALID_BOT_LOG_CHANNEL_CACHE:
                 logger.warning(
-                    "Bot log channel %s not found or not a text channel for guild %s.",
+                    "Bot log channel %s not found, inaccessible, or not a text channel for guild %s.",
                     resolved_channel_id,
                     guild_id if guild_id is not None else "default",
                 )
                 WARNED_INVALID_BOT_LOG_CHANNEL_CACHE.add(cache_key)
             return
         embed = discord.Embed(title=title, description=description, color=color)
-        await channel.send(embed=embed)
+        for attempt in range(1, BOT_LOG_SEND_MAX_ATTEMPTS + 1):
+            try:
+                await channel.send(embed=embed)
+                return
+            except discord.DiscordServerError as exc:
+                if attempt >= BOT_LOG_SEND_MAX_ATTEMPTS:
+                    logger.warning(
+                        "Failed to write log action to channel %s for guild %s after %s attempt(s): %s",
+                        channel.id,
+                        guild_id if guild_id is not None else "default",
+                        attempt,
+                        exc,
+                    )
+                    return
+                await asyncio.sleep(BOT_LOG_SEND_RETRY_DELAY_SECONDS * attempt)
+            except discord.HTTPException as exc:
+                status = int(getattr(exc, "status", 0) or 0)
+                is_server_error = status >= 500
+                if is_server_error and attempt < BOT_LOG_SEND_MAX_ATTEMPTS:
+                    await asyncio.sleep(BOT_LOG_SEND_RETRY_DELAY_SECONDS * attempt)
+                    continue
+                logger.warning(
+                    "Failed to write log action to channel %s for guild %s (status=%s): %s",
+                    channel.id,
+                    guild_id if guild_id is not None else "default",
+                    status or "unknown",
+                    exc,
+                )
+                return
     except Exception as exc:
         logger.exception("Failed to write log action: %s", exc)
 
