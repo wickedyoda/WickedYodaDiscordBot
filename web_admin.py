@@ -366,23 +366,19 @@ def _resolve_log_directory(db_path: str) -> Path:
     return Path(db_path).resolve().parent
 
 
-def _resolve_safe_child_path(base_dir: Path, name: str) -> Path | None:
-    candidate_name = Path(name.strip()).name
-    if not candidate_name or candidate_name in {".", ".."}:
-        return None
-    base_dir_resolved = base_dir.resolve()
-    candidate = (base_dir_resolved / candidate_name).resolve()
-    try:
-        candidate.relative_to(base_dir_resolved)
-    except ValueError:
-        return None
-    return candidate
+def _resolve_log_path(log_dir: Path, selected_log: str) -> Path | None:
+    if selected_log == "bot.log":
+        return (log_dir / "bot.log").resolve()
+    if selected_log == "bot_log.log":
+        return (log_dir / "bot_log.log").resolve()
+    if selected_log == "container_errors.log":
+        return (log_dir / "container_errors.log").resolve()
+    if selected_log == "web_gui_audit.log":
+        return (log_dir / "web_gui_audit.log").resolve()
+    return None
 
 
-def _tail_file(base_dir: Path, name: str, line_limit: int = 400) -> str:
-    safe_path = _resolve_safe_child_path(base_dir, name)
-    if safe_path is None:
-        return "Invalid log file path."
+def _tail_file(safe_path: Path, line_limit: int = 400) -> str:
     if safe_path.suffix.lower() != ".log":
         return "Invalid log file selection."
     if not safe_path.exists() or not safe_path.is_file():
@@ -2330,14 +2326,14 @@ def create_app(
     @login_required
     def logs():
         log_dir = _resolve_log_directory(db_path)
-        discovered_logs = sorted(path.name for path in log_dir.glob("*.log") if path.is_file())
-        log_options = list(dict.fromkeys([*LOG_FILE_OPTIONS, *discovered_logs]))
+        log_options = list(LOG_FILE_OPTIONS)
         if not log_options:
             log_options = list(LOG_FILE_OPTIONS)
         selected_log = Path(request.args.get("log", log_options[0]).strip()).name
         if selected_log not in log_options:
             selected_log = log_options[0]
-        log_preview = _tail_file(log_dir, selected_log)
+        selected_path = _resolve_log_path(log_dir, selected_log)
+        log_preview = _tail_file(selected_path) if selected_path is not None else "Invalid log file selection."
         return _render_page(
             "logs",
             "Web Admin Logs",
