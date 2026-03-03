@@ -649,7 +649,7 @@ PAGE_TEMPLATE = """
 <body data-theme="light">
   <nav class="navbar navbar-expand-lg border-bottom sticky-top">
     <div class="container-fluid px-3 px-lg-4">
-      <a class="navbar-brand brand" href="{{ url_for('dashboard') }}">WickedYoda's Little Helper</a>
+      <a class="navbar-brand brand" href="{{ url_for('home') }}">WickedYoda's Little Helper</a>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#topNav">
         <span class="navbar-toggler-icon"></span>
       </button>
@@ -660,6 +660,7 @@ PAGE_TEMPLATE = """
         </div>
         {% if session.get("user") %}
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('home') }}">Home</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('actions') }}">Actions</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('youtube_subscriptions') }}">YouTube</a></li>
@@ -680,6 +681,7 @@ PAGE_TEMPLATE = """
         <div class="d-flex align-items-center gap-2">
           <select id="nav-page-select" class="form-select form-select-sm go-page-select">
             <option value="">Go to page...</option>
+            <option value="{{ url_for('home') }}">Home</option>
             <option value="{{ url_for('dashboard') }}">Dashboard</option>
             <option value="{{ url_for('actions') }}">Actions</option>
             <option value="{{ url_for('youtube_subscriptions') }}">YouTube</option>
@@ -699,7 +701,7 @@ PAGE_TEMPLATE = """
           </select>
           {% if guild_options %}
           <form method="post" action="{{ url_for('select_guild') }}" class="d-flex">
-            <input type="hidden" name="next_endpoint" value="{{ request.endpoint or 'dashboard' }}">
+            <input type="hidden" name="next_endpoint" value="{{ request.endpoint or 'home' }}">
             <select class="form-select form-select-sm" name="guild_id" onchange="this.form.submit()">
               {% for guild in guild_options %}
               <option value="{{ guild.id }}" {% if selected_guild_id == guild.id %}selected{% endif %}>{{ guild.name }}</option>
@@ -1947,14 +1949,19 @@ def create_app(
     def enforce_post_security():
         if request.method != "POST":
             return None
-        # Allow login POSTs even when host/origin headers are rewritten by upstream proxies.
-        # Same-origin and CSRF checks still protect authenticated admin POST endpoints.
-        if request.endpoint in {"login", "healthz"}:
+        # Allow health checks without POST enforcement.
+        if request.endpoint in {"healthz"}:
             return None
-        if enforce_same_origin_posts and not _is_same_origin_request():
+        # Allow login and guild switch POSTs when host/origin headers are rewritten by upstream proxies.
+        # CSRF checks still protect guild switch and other authenticated admin POST endpoints.
+        if enforce_same_origin_posts and request.endpoint not in {"login", "select_guild"} and not _is_same_origin_request():
             app.logger.warning("Blocked cross-origin POST request: path=%s ip=%s", request.path, _client_ip())
             return ("Blocked request due to origin policy.", 403)
         if not enforce_csrf:
+            return None
+        if request.endpoint in {"healthz"}:
+            return None
+        if request.endpoint in {"login"}:
             return None
         expected = str(session.get("csrf_token", "")).strip()
         submitted = str(request.form.get("csrf_token", "")).strip() or str(request.headers.get("X-CSRF-Token", "")).strip()
@@ -2023,7 +2030,7 @@ def create_app(
                 _set_auth_session(user, remember_login=remember_login)
                 _resolve_selected_guild_id()
                 flash("Logged in.", "success")
-                return redirect(url_for("dashboard"))
+                return redirect(url_for("home"))
             attempts.append(time.time())
             login_attempts[client_ip] = attempts[-login_max_attempts:]
             flash("Invalid credentials.", "danger")
@@ -2038,7 +2045,7 @@ def create_app(
     @app.get("/")
     def index():
         if _current_user() is not None:
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("home"))
         return redirect(url_for("login"))
 
     @app.get("/status")
@@ -2064,6 +2071,21 @@ def create_app(
             snapshot=snapshot,
             status_refresh_seconds=status_refresh_seconds,
             refresh_options=refresh_options,
+        )
+
+    @app.get("/admin/home")
+    @login_required
+    def home():
+        selected_guild_id, _, _ = _selected_guild_context()
+        counts = _fetch_counts(db_path, guild_id=selected_guild_id)
+        actions = _fetch_actions(db_path, limit=15, guild_id=selected_guild_id)
+        snapshot = get_bot_snapshot()
+        return _render_page(
+            "dashboard",
+            "Web Admin Home",
+            counts=counts,
+            actions=actions,
+            snapshot=snapshot,
         )
 
     @app.get("/admin/observability")
@@ -2190,6 +2212,7 @@ def create_app(
 
         next_endpoint = request.form.get("next_endpoint", "").strip()
         login_allowed_endpoints = {
+            "home",
             "dashboard",
             "actions",
             "youtube_subscriptions",
@@ -2210,9 +2233,9 @@ def create_app(
         allowed_endpoints = login_allowed_endpoints | admin_only_endpoints
         if next_endpoint in allowed_endpoints:
             if next_endpoint in admin_only_endpoints and not bool(session.get("is_admin")):
-                return redirect(url_for("dashboard"))
+                return redirect(url_for("home"))
             return redirect(url_for(next_endpoint))
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("home"))
 
     @app.get("/admin")
     @login_required
