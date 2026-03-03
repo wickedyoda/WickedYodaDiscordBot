@@ -24,6 +24,9 @@ Set these in `env.env`:
 - `WEB_ENABLED` - enable web GUI (`true`/`false`)
 - `WEB_BIND_HOST` - web server bind host (use `0.0.0.0` in Docker)
 - `WEB_PORT` - web GUI port inside container
+- `WEB_TLS_ENABLED` - enable HTTPS for the web GUI (`true`/`false`)
+- `WEB_TLS_CERT_FILE` - optional TLS certificate path (requires `WEB_TLS_KEY_FILE`)
+- `WEB_TLS_KEY_FILE` - optional TLS private key path (requires `WEB_TLS_CERT_FILE`)
 - `ENABLE_MEMBERS_INTENT` - set `true` only if you enabled Server Members Intent in Discord Developer Portal
 - `COMMAND_RESPONSES_EPHEMERAL` - set `false` for public command replies, `true` for user-only (ephemeral) replies
 - `PUPPY_IMAGE_API_URL` - API endpoint used by `/happy` for random puppy images
@@ -67,7 +70,8 @@ DISCORD_TOKEN=your-token
 MANAGED_GUILD_IDS=111111111111111111,222222222222222222
 WEB_ENABLED=true
 WEB_BIND_HOST=0.0.0.0
-WEB_PORT=8080
+WEB_PORT=8081
+WEB_TLS_ENABLED=true
 ```
 
 ## Included Slash Commands
@@ -100,8 +104,9 @@ SQLite storage is internal to the container at `/app/data/mod_actions.db`.
 
 ## Web Admin GUI
 
-- URL: `http://localhost:8080`
+- URL: `https://localhost:8081`
 - Login: `WEB_ADMIN_DEFAULT_USERNAME` / `WEB_ADMIN_DEFAULT_PASSWORD`
+- If `WEB_TLS_ENABLED=true` and cert/key files are not set, Flask runs with an adhoc self-signed certificate.
 - Use the guild dropdown in the top nav to switch the server you are managing.
 - Theme switcher (Light/Black) is available in the top nav and persists per browser.
 - Login includes optional "Keep me signed in" mode (5-day max), inactivity timeout, and IP-based login attempt throttling.

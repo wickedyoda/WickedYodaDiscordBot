@@ -68,7 +68,10 @@ MANAGED_GUILD_IDS_RAW = os.getenv("MANAGED_GUILD_IDS", "").strip()
 DATA_DIR = os.getenv("DATA_DIR", "/app/data")
 WEB_ENABLED = env_bool("WEB_ENABLED", True)
 WEB_BIND_HOST = os.getenv("WEB_BIND_HOST", "127.0.0.1")
-WEB_PORT = env_int("WEB_PORT", 8080)
+WEB_PORT = env_int("WEB_PORT", 8081)
+WEB_TLS_ENABLED = env_bool("WEB_TLS_ENABLED", False)
+WEB_TLS_CERT_FILE = os.getenv("WEB_TLS_CERT_FILE", "").strip()
+WEB_TLS_KEY_FILE = os.getenv("WEB_TLS_KEY_FILE", "").strip()
 ENABLE_MEMBERS_INTENT = env_bool("ENABLE_MEMBERS_INTENT", False)
 COMMAND_RESPONSES_EPHEMERAL = env_bool("COMMAND_RESPONSES_EPHEMERAL", False)
 SHORTENER_ENABLED = env_bool("SHORTENER_ENABLED", False)
@@ -82,6 +85,9 @@ UPTIME_STATUS_ENABLED = env_bool("UPTIME_STATUS_ENABLED", True)
 UPTIME_STATUS_TIMEOUT_SECONDS = env_int("UPTIME_STATUS_TIMEOUT_SECONDS", 8)
 WEB_RESTART_ENABLED = env_bool("WEB_RESTART_ENABLED", False)
 WEB_AVATAR_MAX_UPLOAD_BYTES = max(1024, env_int("WEB_AVATAR_MAX_UPLOAD_BYTES", 2 * 1024 * 1024))
+
+if WEB_TLS_ENABLED and bool(WEB_TLS_CERT_FILE) != bool(WEB_TLS_KEY_FILE):
+    raise RuntimeError("WEB_TLS_CERT_FILE and WEB_TLS_KEY_FILE must both be set when using custom TLS certificates.")
 
 if MANAGED_GUILD_IDS_RAW:
     parsed_guild_ids: set[int] = set()
@@ -1470,6 +1476,12 @@ class ModerationBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         if WEB_ENABLED and self.web_thread is None:
+            ssl_context: str | tuple[str, str] | None = None
+            if WEB_TLS_ENABLED:
+                if WEB_TLS_CERT_FILE and WEB_TLS_KEY_FILE:
+                    ssl_context = (WEB_TLS_CERT_FILE, WEB_TLS_KEY_FILE)
+                else:
+                    ssl_context = "adhoc"
             self.web_thread = start_web_admin(
                 db_path=ACTION_DB_PATH,
                 get_bot_snapshot=self.get_web_snapshot,
@@ -1488,8 +1500,10 @@ class ModerationBot(commands.Bot):
                 resolve_youtube_subscription=lambda source_url: resolve_youtube_subscription_seed(source_url),
                 host=WEB_BIND_HOST,
                 port=WEB_PORT,
+                ssl_context=ssl_context,
             )
-            logger.info("Web admin started at http://%s:%s", WEB_BIND_HOST, WEB_PORT)
+            scheme = "https" if WEB_TLS_ENABLED else "http"
+            logger.info("Web admin started at %s://%s:%s", scheme, WEB_BIND_HOST, WEB_PORT)
         if YOUTUBE_NOTIFY_ENABLED and self.youtube_monitor_task is None:
             self.youtube_monitor_task = self.loop.create_task(self.youtube_monitor_loop(), name="youtube-monitor")
 
