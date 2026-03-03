@@ -35,6 +35,7 @@ SETTINGS_FIELD_ORDER = [
     "WEB_BIND_HOST",
     "WEB_PORT",
     "WEB_TLS_ENABLED",
+    "WEB_TLS_PORT",
     "WEB_TLS_CERT_FILE",
     "WEB_TLS_KEY_FILE",
     "ENABLE_MEMBERS_INTENT",
@@ -81,7 +82,8 @@ SETTINGS_DROPDOWN_OPTIONS: dict[str, tuple[str, ...]] = {
     "WEB_SESSION_COOKIE_SAMESITE": SESSION_SAMESITE_OPTIONS,
     "WEB_SESSION_TIMEOUT_MINUTES": ("30", "60", "120", "240"),
     "WEB_AVATAR_MAX_UPLOAD_BYTES": ("262144", "524288", "1048576", "2097152", "3145728", "4194304"),
-    "WEB_PORT": ("8081", "8080", "8000", "5000"),
+    "WEB_PORT": ("8080", "8000", "5000"),
+    "WEB_TLS_PORT": ("8081", "8443", "4443"),
     "PUPPY_IMAGE_TIMEOUT_SECONDS": ("5", "8", "10", "15", "30"),
     "SHORTENER_TIMEOUT_SECONDS": ("5", "8", "10", "15", "30"),
     "YOUTUBE_POLL_INTERVAL_SECONDS": ("60", "120", "300", "600", "900"),
@@ -345,17 +347,21 @@ def _validate_settings_payload(payload: dict[str, str], allowed_keys: list[str])
         if options and raw_value and raw_value not in options:
             errors.append(f"{key} has an invalid option.")
             continue
-        if key in {"GUILD_ID", "Bot_Log_Channel", "WEB_PORT", "WEB_AVATAR_MAX_UPLOAD_BYTES"} and raw_value:
+        if key in {"GUILD_ID", "Bot_Log_Channel", "WEB_PORT", "WEB_TLS_PORT", "WEB_AVATAR_MAX_UPLOAD_BYTES"} and raw_value:
             if not raw_value.isdigit():
                 errors.append(f"{key} must be numeric.")
                 continue
         validated[key] = raw_value
 
     tls_enabled = validated.get("WEB_TLS_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+    web_port = validated.get("WEB_PORT", "").strip()
+    tls_port = validated.get("WEB_TLS_PORT", "").strip()
     tls_cert = validated.get("WEB_TLS_CERT_FILE", "").strip()
     tls_key = validated.get("WEB_TLS_KEY_FILE", "").strip()
     if tls_enabled and bool(tls_cert) != bool(tls_key):
         errors.append("WEB_TLS_CERT_FILE and WEB_TLS_KEY_FILE must both be set when WEB_TLS_ENABLED is true.")
+    if tls_enabled and web_port and tls_port and web_port == tls_port:
+        errors.append("WEB_TLS_PORT must be different from WEB_PORT when WEB_TLS_ENABLED is true.")
     return validated, errors
 
 
@@ -2657,7 +2663,10 @@ def start_web_admin(
     )
 
     def run() -> None:
-        app.run(host=host, port=port, debug=False, use_reloader=False, ssl_context=ssl_context)
+        try:
+            app.run(host=host, port=port, debug=False, use_reloader=False, ssl_context=ssl_context)
+        except Exception:
+            logging.getLogger("wickedyoda-helper").exception("Web admin listener failed to start on %s:%s", host, port)
 
     thread = threading.Thread(target=run, daemon=True, name="web-admin")
     thread.start()
