@@ -8,8 +8,13 @@ services:
     ports:
       - "8080:8080"
       - "8081:8081"
+    volumes:
+      - wickedyoda_data:/app/data
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     restart: unless-stopped
+
+volumes:
+  wickedyoda_data:

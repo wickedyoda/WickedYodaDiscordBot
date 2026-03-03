@@ -2663,7 +2663,10 @@ def start_web_admin(
     )
 
     def run() -> None:
-        app.run(host=host, port=port, debug=False, use_reloader=False, ssl_context=ssl_context)
+        try:
+            app.run(host=host, port=port, debug=False, use_reloader=False, ssl_context=ssl_context)
+        except Exception:
+            logging.getLogger("wickedyoda-helper").exception("Web admin listener failed to start on %s:%s", host, port)
 
     thread = threading.Thread(target=run, daemon=True, name="web-admin")
     thread.start()

@@ -1,5 +1,6 @@
 import asyncio
 import http.client
+import importlib.util
 import io
 import json
 import logging
@@ -122,6 +123,8 @@ if BOT_LOG_CHANNEL <= 0:
     logger.warning(
         "Bot_Log_Channel is not set. Configure per-guild bot log channels in /admin/guild-settings or set Bot_Log_Channel in env."
     )
+INVALID_BOT_LOG_CHANNEL_CACHE: set[tuple[int | None, int]] = set()
+WARNED_INVALID_BOT_LOG_CHANNEL_CACHE: set[tuple[int | None, int]] = set()
 
 SHORT_CODE_REGEX = re.compile(r"Link saved:\s*([0-9]{4,})")
 STATUS_PAGE_PATH_REGEX = re.compile(r"^/status/([^/]+)/?$")
@@ -1501,32 +1504,39 @@ class ModerationBot(commands.Bot):
             )
             logger.info("Web admin HTTP started at http://%s:%s", WEB_BIND_HOST, WEB_PORT)
             if WEB_TLS_ENABLED and self.web_tls_thread is None:
-                ssl_context: str | tuple[str, str]
+                ssl_context: str | tuple[str, str] | None = None
                 if WEB_TLS_CERT_FILE and WEB_TLS_KEY_FILE:
                     ssl_context = (WEB_TLS_CERT_FILE, WEB_TLS_KEY_FILE)
-                else:
+                elif importlib.util.find_spec("cryptography") is not None:
                     ssl_context = "adhoc"
-                self.web_tls_thread = start_web_admin(
-                    db_path=ACTION_DB_PATH,
-                    get_bot_snapshot=self.get_web_snapshot,
-                    get_managed_guilds=self.get_web_managed_guilds,
-                    get_discord_catalog=self.get_web_discord_catalog,
-                    get_command_permissions=run_web_get_command_permissions,
-                    save_command_permissions=run_web_update_command_permissions,
-                    get_tag_responses=run_web_get_tag_responses,
-                    save_tag_responses=run_web_save_tag_responses,
-                    get_guild_settings=run_web_get_guild_settings,
-                    save_guild_settings=run_web_save_guild_settings,
-                    get_bot_profile=run_web_get_bot_profile,
-                    update_bot_profile=run_web_update_bot_profile,
-                    update_bot_avatar=run_web_update_bot_avatar,
-                    request_restart=run_web_request_restart,
-                    resolve_youtube_subscription=lambda source_url: resolve_youtube_subscription_seed(source_url),
-                    host=WEB_BIND_HOST,
-                    port=WEB_TLS_PORT,
-                    ssl_context=ssl_context,
-                )
-                logger.info("Web admin HTTPS started at https://%s:%s", WEB_BIND_HOST, WEB_TLS_PORT)
+                else:
+                    logger.error(
+                        "WEB_TLS_ENABLED is true but cryptography is not installed and no WEB_TLS_CERT_FILE/WEB_TLS_KEY_FILE were set. "
+                        "HTTPS listener on port %s is disabled; install cryptography or provide certificate files.",
+                        WEB_TLS_PORT,
+                    )
+                if ssl_context is not None:
+                    self.web_tls_thread = start_web_admin(
+                        db_path=ACTION_DB_PATH,
+                        get_bot_snapshot=self.get_web_snapshot,
+                        get_managed_guilds=self.get_web_managed_guilds,
+                        get_discord_catalog=self.get_web_discord_catalog,
+                        get_command_permissions=run_web_get_command_permissions,
+                        save_command_permissions=run_web_update_command_permissions,
+                        get_tag_responses=run_web_get_tag_responses,
+                        save_tag_responses=run_web_save_tag_responses,
+                        get_guild_settings=run_web_get_guild_settings,
+                        save_guild_settings=run_web_save_guild_settings,
+                        get_bot_profile=run_web_get_bot_profile,
+                        update_bot_profile=run_web_update_bot_profile,
+                        update_bot_avatar=run_web_update_bot_avatar,
+                        request_restart=run_web_request_restart,
+                        resolve_youtube_subscription=lambda source_url: resolve_youtube_subscription_seed(source_url),
+                        host=WEB_BIND_HOST,
+                        port=WEB_TLS_PORT,
+                        ssl_context=ssl_context,
+                    )
+                    logger.info("Web admin HTTPS started at https://%s:%s", WEB_BIND_HOST, WEB_TLS_PORT)
         if YOUTUBE_NOTIFY_ENABLED and self.youtube_monitor_task is None:
             self.youtube_monitor_task = self.loop.create_task(self.youtube_monitor_loop(), name="youtube-monitor")
 
@@ -1776,7 +1786,10 @@ async def get_log_channel(client: commands.Bot, guild_id: int | None = None) -> 
     channel = await get_text_channel(client, channel_id)
     if isinstance(channel, discord.TextChannel):
         if guild_id is None or channel.guild.id == guild_id:
+            INVALID_BOT_LOG_CHANNEL_CACHE.discard((guild_id, channel_id))
+            WARNED_INVALID_BOT_LOG_CHANNEL_CACHE.discard((guild_id, channel_id))
             return channel
+    INVALID_BOT_LOG_CHANNEL_CACHE.add((guild_id, channel_id))
     return None
 
 
@@ -1785,11 +1798,15 @@ async def log_action(client: commands.Bot, title: str, description: str, color: 
         bot_channel_logger.info("%s | %s", title, description.replace("\n", " | "))
         channel = await get_log_channel(client, guild_id=guild_id)
         if channel is None:
-            logger.error(
-                "Bot log channel %s not found or not a text channel for guild %s.",
-                resolve_bot_log_channel_id(guild_id=guild_id),
-                guild_id if guild_id is not None else "default",
-            )
+            resolved_channel_id = resolve_bot_log_channel_id(guild_id=guild_id)
+            cache_key = (guild_id, resolved_channel_id)
+            if cache_key in INVALID_BOT_LOG_CHANNEL_CACHE and cache_key not in WARNED_INVALID_BOT_LOG_CHANNEL_CACHE:
+                logger.warning(
+                    "Bot log channel %s not found or not a text channel for guild %s.",
+                    resolved_channel_id,
+                    guild_id if guild_id is not None else "default",
+                )
+                WARNED_INVALID_BOT_LOG_CHANNEL_CACHE.add(cache_key)
             return
         embed = discord.Embed(title=title, description=description, color=color)
         await channel.send(embed=embed)
