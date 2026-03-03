@@ -367,9 +367,23 @@ def _validate_settings_payload(payload: dict[str, str], allowed_keys: list[str])
 
 def _resolve_log_directory(db_path: str) -> Path:
     configured = os.getenv("LOG_DIR", "").strip()
-    if configured:
-        return Path(configured).expanduser()
-    return Path(db_path).resolve().parent
+    fallback = Path(db_path).resolve().parent
+    preferred = Path(configured).expanduser() if configured else fallback
+    candidates = [preferred]
+    if fallback != preferred:
+        candidates.append(fallback)
+
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            test_path = candidate / ".wickedyoda-log-write-test"
+            with test_path.open("a", encoding="utf-8"):
+                pass
+            test_path.unlink(missing_ok=True)
+            return candidate
+        except OSError:
+            continue
+    return fallback
 
 
 def _resolve_log_path(log_dir: Path, selected_log: str) -> Path | None:
@@ -664,7 +678,7 @@ PAGE_TEMPLATE = """
           <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('actions') }}">Actions</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('youtube_subscriptions') }}">YouTube</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('public_status_everything') }}">Status</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('status_page') }}">Status</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('logs') }}">Logs</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('wiki') }}">Wiki</a></li>
           {% if session.get("is_admin") %}
@@ -685,7 +699,7 @@ PAGE_TEMPLATE = """
             <option value="{{ url_for('dashboard') }}">Dashboard</option>
             <option value="{{ url_for('actions') }}">Actions</option>
             <option value="{{ url_for('youtube_subscriptions') }}">YouTube</option>
-            <option value="{{ url_for('public_status_everything') }}">Status</option>
+            <option value="{{ url_for('status_page') }}">Status</option>
             <option value="{{ url_for('logs') }}">Logs</option>
             <option value="{{ url_for('wiki') }}">Wiki</option>
             <option value="{{ url_for('account') }}">Account</option>
@@ -850,6 +864,57 @@ PAGE_TEMPLATE = """
           </table>
         </div>
       </div>
+    {% elif page == "home" %}
+      <div class="card card-soft p-3 mb-3">
+        <h1 class="h5 mb-2">Control Center</h1>
+        <p class="text-secondary mb-0">Manage moderation workflows, guild configuration, notifications, and runtime health from one place.</p>
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-6 col-lg-3">
+          <a class="card card-soft p-3 h-100 text-decoration-none" href="{{ url_for('dashboard') }}">
+            <p class="text-secondary small mb-1">Open</p>
+            <p class="mb-0 fw-semibold">Dashboard</p>
+          </a>
+        </div>
+        <div class="col-6 col-lg-3">
+          <a class="card card-soft p-3 h-100 text-decoration-none" href="{{ url_for('status_page') }}">
+            <p class="text-secondary small mb-1">Open</p>
+            <p class="mb-0 fw-semibold">Status</p>
+          </a>
+        </div>
+        <div class="col-6 col-lg-3">
+          <a class="card card-soft p-3 h-100 text-decoration-none" href="{{ url_for('observability') }}">
+            <p class="text-secondary small mb-1">Open</p>
+            <p class="mb-0 fw-semibold">Observability</p>
+          </a>
+        </div>
+        <div class="col-6 col-lg-3">
+          <a class="card card-soft p-3 h-100 text-decoration-none" href="{{ url_for('logs') }}">
+            <p class="text-secondary small mb-1">Open</p>
+            <p class="mb-0 fw-semibold">Logs</p>
+          </a>
+        </div>
+      </div>
+      <div class="row g-3">
+        <div class="col-12 col-md-4">
+          <div class="card card-soft p-3 h-100">
+            <p class="text-secondary small mb-1">Bot</p>
+            <p class="mb-0 fw-semibold">{{ snapshot.bot_name }}</p>
+          </div>
+        </div>
+        <div class="col-12 col-md-4">
+          <div class="card card-soft p-3 h-100">
+            <p class="text-secondary small mb-1">Selected Guild</p>
+            <p class="mb-0 fw-semibold">{{ selected_guild_name or snapshot.guild_id }}</p>
+          </div>
+        </div>
+        <div class="col-12 col-md-4">
+          <div class="card card-soft p-3 h-100">
+            <p class="text-secondary small mb-1">Latency</p>
+            <p class="mb-0 fw-semibold">{{ snapshot.latency_ms }} ms</p>
+          </div>
+        </div>
+      </div>
     {% elif page == "dashboard" %}
       <div class="row g-3 mb-3">
         <div class="col-12 col-md-4">
@@ -914,6 +979,51 @@ PAGE_TEMPLATE = """
             </tbody>
           </table>
         </div>
+      </div>
+    {% elif page == "status_admin" %}
+      <div class="card card-soft p-3 mb-3">
+        <h1 class="h5 mb-2">Service Status</h1>
+        <p class="text-secondary mb-0">Focused service health view for the selected guild, separate from dashboard analytics.</p>
+      </div>
+      <div class="row g-3 mb-3">
+        {% for check in status_checks %}
+        <div class="col-12 col-md-4">
+          <div class="card card-soft p-3 h-100">
+            <p class="text-secondary small mb-1">{{ check.component }}</p>
+            <p class="mb-1 fw-semibold">{{ check.state }}</p>
+            <p class="small mb-0 text-secondary">{{ check.detail }}</p>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="card card-soft p-3 mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h2 class="h6 mb-0">Latest Action Events</h2>
+          <a href="{{ url_for('actions') }}" class="btn btn-sm btn-outline-primary">View all</a>
+        </div>
+        <div class="table-wrap">
+          <table class="table table-sm align-middle">
+            <thead><tr><th>Time (UTC)</th><th>Action</th><th>Status</th><th>Moderator</th><th>Target</th></tr></thead>
+            <tbody>
+              {% for row in actions %}
+              <tr>
+                <td class="small">{{ row.created_at }}</td>
+                <td>{{ row.action }}</td>
+                <td><span class="badge text-bg-{{ 'success' if row.status == 'success' else 'danger' }} status-pill">{{ row.status }}</span></td>
+                <td class="small">{{ row.moderator or '-' }}</td>
+                <td class="small">{{ row.target or '-' }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="5" class="text-secondary">No actions logged yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card card-soft p-3">
+        <h2 class="h6 mb-2">Status Log Tail ({{ status_log_name }})</h2>
+        <p class="small text-secondary mb-2">Source directory: {{ status_log_dir }}</p>
+        <pre class="small mb-0" style="white-space: pre-wrap; max-height: 35vh; overflow-y: auto;">{{ status_log_tail }}</pre>
       </div>
     {% elif page == "actions" %}
       <div class="card card-soft p-3">
@@ -1949,27 +2059,35 @@ def create_app(
     def enforce_post_security():
         if request.method != "POST":
             return None
-        # Allow health checks without POST enforcement.
         if request.endpoint in {"healthz"}:
             return None
-        # Allow login and guild switch POSTs when host/origin headers are rewritten by upstream proxies.
-        # CSRF checks still protect guild switch and other authenticated admin POST endpoints.
-        if enforce_same_origin_posts and request.endpoint not in {"login", "select_guild"} and not _is_same_origin_request():
+
+        if enforce_csrf and request.endpoint not in {"login"}:
+            expected = str(session.get("csrf_token", "")).strip()
+            submitted = str(request.form.get("csrf_token", "")).strip() or str(request.headers.get("X-CSRF-Token", "")).strip()
+            if not expected:
+                expected = _ensure_csrf_token()
+            if not submitted or submitted != expected:
+                app.logger.warning("Blocked POST request with invalid CSRF token: endpoint=%s ip=%s", request.endpoint, _client_ip())
+                return ("Invalid CSRF token.", 403)
+
+        if enforce_same_origin_posts and not _is_same_origin_request():
+            if request.endpoint in {"login"}:
+                app.logger.warning(
+                    "Origin mismatch for login POST, accepted for reverse-proxy compatibility: ip=%s",
+                    _client_ip(),
+                )
+                return None
+            # Proxy layers can rewrite host/origin headers; for authenticated forms we trust CSRF validation.
+            if enforce_csrf:
+                app.logger.warning(
+                    "Origin mismatch for POST, accepted because CSRF token was valid: endpoint=%s ip=%s",
+                    request.endpoint,
+                    _client_ip(),
+                )
+                return None
             app.logger.warning("Blocked cross-origin POST request: path=%s ip=%s", request.path, _client_ip())
             return ("Blocked request due to origin policy.", 403)
-        if not enforce_csrf:
-            return None
-        if request.endpoint in {"healthz"}:
-            return None
-        if request.endpoint in {"login"}:
-            return None
-        expected = str(session.get("csrf_token", "")).strip()
-        submitted = str(request.form.get("csrf_token", "")).strip() or str(request.headers.get("X-CSRF-Token", "")).strip()
-        if not expected:
-            expected = _ensure_csrf_token()
-        if not submitted or submitted != expected:
-            app.logger.warning("Blocked POST request with invalid CSRF token: endpoint=%s ip=%s", request.endpoint, _client_ip())
-            return ("Invalid CSRF token.", 403)
         return None
 
     @app.get("/healthz")
@@ -2081,11 +2199,51 @@ def create_app(
         actions = _fetch_actions(db_path, limit=15, guild_id=selected_guild_id)
         snapshot = get_bot_snapshot()
         return _render_page(
-            "dashboard",
+            "home",
             "Web Admin Home",
             counts=counts,
             actions=actions,
             snapshot=snapshot,
+        )
+
+    @app.get("/admin/status")
+    @login_required
+    def status_page():
+        selected_guild_id, _, _ = _selected_guild_context()
+        counts = _fetch_counts(db_path, guild_id=selected_guild_id)
+        actions = _fetch_actions(db_path, limit=15, guild_id=selected_guild_id)
+        snapshot = get_bot_snapshot()
+        log_dir = _resolve_log_directory(db_path)
+        status_log_path = _resolve_log_path(log_dir, "container_errors.log")
+        if status_log_path is None or not status_log_path.exists():
+            status_log_path = _resolve_log_path(log_dir, "bot.log")
+        status_checks = [
+            {
+                "component": "Discord Session",
+                "state": "Connected" if snapshot.get("bot_name") else "Unknown",
+                "detail": f"Latency: {snapshot.get('latency_ms', 'n/a')} ms",
+            },
+            {
+                "component": "Moderation Store",
+                "state": "Healthy" if counts.get("failed", 0) <= counts.get("total", 0) else "Degraded",
+                "detail": f"Actions logged: {counts.get('total', 0)}",
+            },
+            {
+                "component": "Web Runtime",
+                "state": "Healthy",
+                "detail": f"Log directory: {log_dir}",
+            },
+        ]
+        return _render_page(
+            "status_admin",
+            "Service Status",
+            actions=actions,
+            status_checks=status_checks,
+            status_log_name=status_log_path.name if status_log_path is not None else "n/a",
+            status_log_dir=str(log_dir),
+            status_log_tail=_tail_file(status_log_path, line_limit=120)
+            if status_log_path is not None
+            else "No status log file configured.",
         )
 
     @app.get("/admin/observability")
@@ -2214,6 +2372,7 @@ def create_app(
         login_allowed_endpoints = {
             "home",
             "dashboard",
+            "status_page",
             "actions",
             "youtube_subscriptions",
             "logs",
@@ -2358,13 +2517,20 @@ def create_app(
     def logs():
         log_dir = _resolve_log_directory(db_path)
         log_options = list(LOG_FILE_OPTIONS)
-        if not log_options:
-            log_options = list(LOG_FILE_OPTIONS)
-        selected_log = Path(request.args.get("log", log_options[0]).strip()).name
+        resolved_paths = {option: _resolve_log_path(log_dir, option) for option in log_options}
+        existing_logs = [option for option, path in resolved_paths.items() if path is not None and path.exists() and path.is_file()]
+        default_log = existing_logs[0] if existing_logs else log_options[0]
+        selected_log = Path(request.args.get("log", default_log).strip()).name
         if selected_log not in log_options:
-            selected_log = log_options[0]
-        selected_path = _resolve_log_path(log_dir, selected_log)
-        log_preview = _tail_file(selected_path) if selected_path is not None else "Invalid log file selection."
+            selected_log = default_log
+        selected_path = resolved_paths.get(selected_log)
+        if selected_path is None:
+            log_preview = "Invalid log file selection."
+        elif existing_logs:
+            log_preview = _tail_file(selected_path)
+        else:
+            expected = ", ".join(log_options)
+            log_preview = f"No logs found in {log_dir}. Expected files: {expected}"
         return _render_page(
             "logs",
             "Web Admin Logs",
