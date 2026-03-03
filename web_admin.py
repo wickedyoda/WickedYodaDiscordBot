@@ -14,7 +14,6 @@ from urllib.parse import urlparse
 
 from flask import Flask, flash, redirect, render_template_string, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
-from werkzeug.utils import safe_join
 
 SENSITIVE_ENV_KEYS = {
     "DISCORD_TOKEN",
@@ -367,14 +366,19 @@ def _resolve_log_directory(db_path: str) -> Path:
     return Path(db_path).resolve().parent
 
 
-def _tail_file(log_dir: Path, log_name: str, line_limit: int = 400) -> str:
-    candidate_name = Path(log_name.strip()).name
-    if not candidate_name or candidate_name in {".", ".."}:
-        return "Invalid log file path."
-    safe_path_raw = safe_join(str(log_dir.resolve()), candidate_name)
-    if not safe_path_raw:
-        return "Invalid log file path."
-    safe_path = Path(safe_path_raw)
+def _resolve_log_path(log_dir: Path, selected_log: str) -> Path | None:
+    if selected_log == "bot.log":
+        return (log_dir / "bot.log").resolve()
+    if selected_log == "bot_log.log":
+        return (log_dir / "bot_log.log").resolve()
+    if selected_log == "container_errors.log":
+        return (log_dir / "container_errors.log").resolve()
+    if selected_log == "web_gui_audit.log":
+        return (log_dir / "web_gui_audit.log").resolve()
+    return None
+
+
+def _tail_file(safe_path: Path, line_limit: int = 400) -> str:
     if safe_path.suffix.lower() != ".log":
         return "Invalid log file selection."
     if not safe_path.exists() or not safe_path.is_file():
@@ -2322,14 +2326,14 @@ def create_app(
     @login_required
     def logs():
         log_dir = _resolve_log_directory(db_path)
-        discovered_logs = sorted(path.name for path in log_dir.glob("*.log") if path.is_file())
-        log_options = list(dict.fromkeys([*LOG_FILE_OPTIONS, *discovered_logs]))
+        log_options = list(LOG_FILE_OPTIONS)
         if not log_options:
             log_options = list(LOG_FILE_OPTIONS)
         selected_log = Path(request.args.get("log", log_options[0]).strip()).name
         if selected_log not in log_options:
             selected_log = log_options[0]
-        log_preview = _tail_file(log_dir, selected_log)
+        selected_path = _resolve_log_path(log_dir, selected_log)
+        log_preview = _tail_file(selected_path) if selected_path is not None else "Invalid log file selection."
         return _render_page(
             "logs",
             "Web Admin Logs",
