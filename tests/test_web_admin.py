@@ -133,7 +133,7 @@ def test_login_allows_forwarded_host_origin_match(tmp_path: Path, monkeypatch) -
     )
 
     assert response.status_code == 302
-    assert "/admin" in response.headers["Location"]
+    assert "/admin/home" in response.headers["Location"]
 
 
 def test_login_not_blocked_by_same_origin_policy(tmp_path: Path, monkeypatch) -> None:
@@ -151,7 +151,32 @@ def test_login_not_blocked_by_same_origin_policy(tmp_path: Path, monkeypatch) ->
     )
 
     assert response.status_code == 302
-    assert "/admin" in response.headers["Location"]
+    assert "/admin/home" in response.headers["Location"]
+
+
+def test_select_guild_not_blocked_by_same_origin_policy(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+    monkeypatch.setenv("GUILD_ID", "123456789012345678")
+    app = create_app(str(tmp_path / "actions.db"), _bot_snapshot)
+    client = app.test_client()
+    csrf_token = _login(client)
+
+    response = client.post(
+        "/admin/select-guild",
+        data={
+            "guild_id": "123456789012345678",
+            "next_endpoint": "home",
+        },
+        headers={
+            "Origin": "http://not-the-same-origin.example",
+            "X-CSRF-Token": csrf_token,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert "/admin/home" in response.headers["Location"]
 
 
 def test_actions_list_renders_existing_records(tmp_path: Path, monkeypatch) -> None:
