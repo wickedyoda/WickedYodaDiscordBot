@@ -418,8 +418,35 @@ def _list_wiki_files() -> list[str]:
     return files
 
 
+def _wiki_root() -> Path:
+    return Path.cwd() / "wiki"
+
+
+def _is_within_wiki_dir(path: Path) -> bool:
+    wiki_root = _wiki_root()
+    try:
+        path.resolve().relative_to(wiki_root.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _get_wiki_page_map() -> dict[str, Path]:
+    page_map: dict[str, Path] = {}
+    wiki_root = _wiki_root()
+    if not wiki_root.exists():
+        return page_map
+    for path in wiki_root.glob("*.md"):
+        if not path.is_file() or path.name.startswith("_"):
+            continue
+        if not _is_within_wiki_dir(path):
+            continue
+        page_map[path.stem.casefold()] = path.resolve()
+    return page_map
+
+
 def _read_wiki_file(filename: str) -> str:
-    wiki_root = Path.cwd() / "wiki"
+    wiki_root = _wiki_root()
     candidate = (wiki_root / filename).resolve()
     try:
         candidate.relative_to(wiki_root.resolve())
@@ -428,6 +455,10 @@ def _read_wiki_file(filename: str) -> str:
     if not candidate.exists() or not candidate.is_file():
         return "Wiki file not found."
     return candidate.read_text(encoding="utf-8", errors="replace")
+
+
+def _wiki_label_from_filename(filename: str) -> str:
+    return Path(filename).stem.replace("-", " ")
 
 
 def _ensure_users_table(db_path: str) -> None:
@@ -675,12 +706,13 @@ PAGE_TEMPLATE = """
         {% if session.get("user") %}
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
           <li class="nav-item"><a class="nav-link" href="{{ url_for('home') }}">Home</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('guilds_page') }}">Servers</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('actions') }}">Actions</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('youtube_subscriptions') }}">YouTube</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('status_page') }}">Status</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('logs') }}">Logs</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('wiki') }}">Wiki</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('documentation') }}">Documentation</a></li>
           {% if session.get("is_admin") %}
           <li class="nav-item"><a class="nav-link" href="{{ url_for('users') }}">Users</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('observability') }}">Observability</a></li>
@@ -696,12 +728,13 @@ PAGE_TEMPLATE = """
           <select id="nav-page-select" class="form-select form-select-sm go-page-select">
             <option value="">Go to page...</option>
             <option value="{{ url_for('home') }}">Home</option>
+            <option value="{{ url_for('guilds_page') }}">Servers</option>
             <option value="{{ url_for('dashboard') }}">Dashboard</option>
             <option value="{{ url_for('actions') }}">Actions</option>
             <option value="{{ url_for('youtube_subscriptions') }}">YouTube</option>
             <option value="{{ url_for('status_page') }}">Status</option>
             <option value="{{ url_for('logs') }}">Logs</option>
-            <option value="{{ url_for('wiki') }}">Wiki</option>
+            <option value="{{ url_for('documentation') }}">Documentation</option>
             <option value="{{ url_for('account') }}">Account</option>
             {% if session.get("is_admin") %}
             <option value="{{ url_for('users') }}">Users</option>
@@ -715,7 +748,7 @@ PAGE_TEMPLATE = """
           </select>
           {% if guild_options %}
           <form method="post" action="{{ url_for('select_guild') }}" class="d-flex">
-            <input type="hidden" name="next_endpoint" value="{{ request.endpoint or 'home' }}">
+            <input type="hidden" name="next_endpoint" value="{{ 'documentation' if request.endpoint == 'documentation_page' else (request.endpoint or 'home') }}">
             <select class="form-select form-select-sm" name="guild_id" onchange="this.form.submit()">
               {% for guild in guild_options %}
               <option value="{{ guild.id }}" {% if selected_guild_id == guild.id %}selected{% endif %}>{{ guild.name }}</option>
@@ -871,9 +904,21 @@ PAGE_TEMPLATE = """
       </div>
       <div class="row g-3 mb-3">
         <div class="col-6 col-lg-3">
+          <a class="card card-soft p-3 h-100 text-decoration-none" href="{{ url_for('guilds_page') }}">
+            <p class="text-secondary small mb-1">Open</p>
+            <p class="mb-0 fw-semibold">Servers</p>
+          </a>
+        </div>
+        <div class="col-6 col-lg-3">
           <a class="card card-soft p-3 h-100 text-decoration-none" href="{{ url_for('dashboard') }}">
             <p class="text-secondary small mb-1">Open</p>
             <p class="mb-0 fw-semibold">Dashboard</p>
+          </a>
+        </div>
+        <div class="col-6 col-lg-3">
+          <a class="card card-soft p-3 h-100 text-decoration-none" href="{{ url_for('documentation') }}">
+            <p class="text-secondary small mb-1">Open</p>
+            <p class="mb-0 fw-semibold">Documentation</p>
           </a>
         </div>
         <div class="col-6 col-lg-3">
@@ -882,6 +927,8 @@ PAGE_TEMPLATE = """
             <p class="mb-0 fw-semibold">Status</p>
           </a>
         </div>
+      </div>
+      <div class="row g-3">
         <div class="col-6 col-lg-3">
           <a class="card card-soft p-3 h-100 text-decoration-none" href="{{ url_for('observability') }}">
             <p class="text-secondary small mb-1">Open</p>
@@ -894,8 +941,6 @@ PAGE_TEMPLATE = """
             <p class="mb-0 fw-semibold">Logs</p>
           </a>
         </div>
-      </div>
-      <div class="row g-3">
         <div class="col-12 col-md-4">
           <div class="card card-soft p-3 h-100">
             <p class="text-secondary small mb-1">Bot</p>
@@ -1128,6 +1173,77 @@ PAGE_TEMPLATE = """
       </div>
       <div class="card card-soft p-3">
         <pre class="small mb-0" style="white-space: pre-wrap; max-height: 60vh; overflow-y: auto;">{{ log_preview }}</pre>
+      </div>
+    {% elif page == "guilds" %}
+      <div class="card card-soft p-3 mb-3">
+        <h1 class="h5 mb-2">Discord Servers</h1>
+        <p class="text-secondary mb-0">Choose which server the web GUI is currently managing. Guild-scoped pages use the selected server context.</p>
+      </div>
+      <div class="row g-3">
+        {% for guild in guild_cards %}
+        <div class="col-12 col-lg-6">
+          <div class="card card-soft p-3 h-100">
+            <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
+              <div>
+                <h2 class="h6 mb-1">{{ guild.name }}</h2>
+                <p class="small text-secondary mb-1">{{ guild.id }}</p>
+                {% if guild.member_count is not none %}
+                <p class="small text-secondary mb-0">Members: {{ guild.member_count }}</p>
+                {% endif %}
+              </div>
+              {% if guild.selected %}
+              <span class="badge text-bg-primary">Selected</span>
+              {% endif %}
+            </div>
+            <form method="post" action="{{ url_for('select_guild') }}">
+              <input type="hidden" name="guild_id" value="{{ guild.id }}">
+              <input type="hidden" name="next_endpoint" value="dashboard">
+              <button class="btn btn-primary btn-sm" type="submit" {% if guild.selected %}disabled{% endif %}>
+                {% if guild.selected %}Currently Selected{% else %}Manage This Server{% endif %}
+              </button>
+            </form>
+          </div>
+        </div>
+        {% else %}
+        <div class="col-12">
+          <div class="card card-soft p-3">
+            <p class="text-secondary mb-0">No Discord servers are currently available to this bot.</p>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% elif page == "documentation" %}
+      <div class="card card-soft p-3 mb-3">
+        <div class="d-flex justify-content-between align-items-center gap-2">
+          <div>
+            <h1 class="h5 mb-1">Documentation</h1>
+            <p class="text-secondary mb-0">Browse wiki pages packaged with this bot image.</p>
+          </div>
+          {% if github_wiki_url %}
+          <a class="btn btn-outline-primary btn-sm" href="{{ github_wiki_url }}" target="_blank" rel="noreferrer">Open GitHub Wiki</a>
+          {% endif %}
+        </div>
+      </div>
+      <div class="row g-3">
+        <div class="col-12 col-lg-4">
+          <div class="card card-soft p-3 h-100">
+            <h2 class="h6 mb-3">Pages</h2>
+            <div class="list-group list-group-flush">
+              {% for item in documentation_pages %}
+              <a class="list-group-item list-group-item-action {% if item.slug == selected_doc_slug %}active{% endif %}" href="{{ url_for('documentation_page', page_slug=item.slug) }}">
+                <div class="fw-semibold">{{ item.label }}</div>
+                <div class="small {% if item.slug == selected_doc_slug %}text-white-50{% else %}text-secondary{% endif %}">{{ item.filename }}</div>
+              </a>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-lg-8">
+          <div class="card card-soft p-3">
+            <h2 class="h6 mb-3">{{ documentation_title }}</h2>
+            <pre class="small mb-0" style="white-space: pre-wrap;">{{ documentation_content }}</pre>
+          </div>
+        </div>
       </div>
     {% elif page == "wiki" %}
       <div class="card card-soft p-3 mb-3">
@@ -1590,7 +1706,18 @@ def create_app(
                 guild_id = int(raw_id.strip())
             else:
                 continue
-            options.append({"id": guild_id, "name": raw_name.strip() or str(guild_id)})
+            member_count = item.get("member_count")
+            if not isinstance(member_count, int):
+                member_count = None
+            options.append(
+                {
+                    "id": guild_id,
+                    "name": raw_name.strip() or str(guild_id),
+                    "member_count": member_count,
+                    "icon_url": str(item.get("icon_url", "")).strip(),
+                    "is_primary": bool(item.get("is_primary", False)),
+                }
+            )
 
         if options:
             return sorted(options, key=lambda item: item["name"].lower())
@@ -2206,6 +2333,26 @@ def create_app(
             snapshot=snapshot,
         )
 
+    @app.get("/admin/guilds")
+    @login_required
+    def guilds_page():
+        selected_guild_id, guild_options, _ = _selected_guild_context()
+        guild_cards = []
+        for guild in guild_options:
+            guild_cards.append(
+                {
+                    "id": guild["id"],
+                    "name": guild["name"],
+                    "selected": selected_guild_id == guild["id"],
+                    "member_count": guild.get("member_count"),
+                }
+            )
+        return _render_page(
+            "guilds",
+            "Discord Servers",
+            guild_cards=guild_cards,
+        )
+
     @app.get("/admin/status")
     @login_required
     def status_page():
@@ -2371,12 +2518,14 @@ def create_app(
         next_endpoint = request.form.get("next_endpoint", "").strip()
         login_allowed_endpoints = {
             "home",
+            "guilds_page",
             "dashboard",
             "status_page",
             "actions",
             "youtube_subscriptions",
             "logs",
             "wiki",
+            "documentation",
             "account",
             "observability",
             "public_status_everything",
@@ -2542,21 +2691,74 @@ def create_app(
     @app.get("/admin/wiki")
     @login_required
     def wiki():
+        return redirect(url_for("documentation"))
+
+    @app.get("/admin/documentation")
+    @login_required
+    def documentation():
+        page_map = _get_wiki_page_map()
+        entries = [
+            {
+                "slug": path.stem,
+                "label": _wiki_label_from_filename(path.name),
+                "filename": path.name,
+            }
+            for path in sorted(
+                page_map.values(),
+                key=lambda value: (0 if value.stem.casefold() == "home" else 1, value.stem.casefold()),
+            )
+        ]
+        if not entries:
+            return _render_page(
+                "documentation",
+                "Documentation",
+                documentation_pages=[],
+                selected_doc_slug="",
+                documentation_title="Documentation",
+                documentation_content="No wiki markdown files found in ./wiki.",
+                github_wiki_url=os.getenv("WEB_GITHUB_WIKI_URL", "").strip(),
+            )
+
+        first_entry = entries[0]
+        return redirect(url_for("documentation_page", page_slug=first_entry["slug"]))
+
+    @app.get("/admin/documentation/<page_slug>")
+    @login_required
+    def documentation_page(page_slug: str):
+        if not page_slug or not page_slug.replace("-", "").replace("_", "").isalnum():
+            return {"ok": False, "error": "Invalid documentation page."}, 404
+        page_map = _get_wiki_page_map()
+        entries = [
+            {
+                "slug": path.stem,
+                "label": _wiki_label_from_filename(path.name),
+                "filename": path.name,
+                "path": path,
+            }
+            for path in sorted(
+                page_map.values(),
+                key=lambda value: (0 if value.stem.casefold() == "home" else 1, value.stem.casefold()),
+            )
+        ]
+        selected_entry = next((item for item in entries if item["slug"].casefold() == page_slug.casefold()), None)
+        if selected_entry is None:
+            return {"ok": False, "error": "Documentation page not found."}, 404
+        selected_path = selected_entry["path"]
+        if not isinstance(selected_path, Path) or not _is_within_wiki_dir(selected_path):
+            return {"ok": False, "error": "Documentation page not found."}, 404
+        content = selected_path.read_text(encoding="utf-8", errors="replace")
+        title = selected_entry["label"]
+        first_line = content.splitlines()[0].strip() if content else ""
+        if first_line.startswith("#"):
+            title = first_line.lstrip("#").strip() or title
         wiki_files = _list_wiki_files()
-        selected_wiki = request.args.get("doc", "").strip()
-        if wiki_files:
-            if selected_wiki not in wiki_files:
-                selected_wiki = wiki_files[0]
-            wiki_content = _read_wiki_file(selected_wiki)
-        else:
-            selected_wiki = ""
-            wiki_content = "No wiki markdown files found in ./wiki."
         return _render_page(
-            "wiki",
-            "Web Admin Wiki",
-            wiki_files=wiki_files,
-            selected_wiki=selected_wiki,
-            wiki_content=wiki_content,
+            "documentation",
+            title,
+            documentation_pages=[{key: value for key, value in item.items() if key != "path"} for item in entries],
+            selected_doc_slug=selected_entry["slug"],
+            documentation_title=title,
+            documentation_content=content if wiki_files else "No wiki markdown files found in ./wiki.",
             github_wiki_url=os.getenv("WEB_GITHUB_WIKI_URL", "").strip(),
         )
 

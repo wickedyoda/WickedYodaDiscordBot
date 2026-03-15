@@ -737,7 +737,12 @@ def resolve_action_db_path() -> str:
                 logger.warning("Action DB path %s is not writable; using fallback %s", preferred_path, path)
             return path
         except Exception as exc:
-            logger.warning("Unable to use action DB path %s: %s", path, exc)
+            logger.warning(
+                "Unable to use action DB path %s: %s. Check mounted volume permissions for DATA_DIR=%s.",
+                path,
+                exc,
+                DATA_DIR,
+            )
 
     raise RuntimeError("No writable SQLite database path found for moderation action store.")
 
@@ -766,7 +771,12 @@ def resolve_log_dir(db_path: str) -> str:
             os.remove(test_path)
             return candidate
         except OSError as exc:
-            logger.warning("Unable to use LOG_DIR %s: %s", candidate, exc)
+            logger.warning(
+                "Unable to use LOG_DIR %s: %s. Set LOG_DIR to a writable path such as %s.",
+                candidate,
+                exc,
+                os.path.dirname(db_path) or ".",
+            )
     raise RuntimeError("No writable log directory available.")
 
 
@@ -1611,7 +1621,17 @@ class ModerationBot(commands.Bot):
 
     def get_web_managed_guilds(self) -> list[dict]:
         managed = self.get_managed_guilds()
-        return [{"id": guild.id, "name": guild.name} for guild in managed]
+        primary_guild_id = GUILD_ID_CONFIGURED or (sorted(MANAGED_GUILD_IDS)[0] if MANAGED_GUILD_IDS else None)
+        return [
+            {
+                "id": guild.id,
+                "name": guild.name,
+                "member_count": guild.member_count,
+                "icon_url": str(guild.icon.url) if guild.icon else "",
+                "is_primary": primary_guild_id == guild.id,
+            }
+            for guild in managed
+        ]
 
     def get_web_discord_catalog(self, guild_id: int | None = None) -> dict:
         selected_guild_id = int(guild_id) if isinstance(guild_id, int) else GUILD_ID
@@ -1781,17 +1801,56 @@ def resolve_bot_log_channel_id(guild_id: int | None = None) -> int:
     return BOT_LOG_CHANNEL
 
 
+def warn_invalid_bot_log_channel(guild_id: int | None, channel_id: int, reason: str) -> None:
+    if channel_id <= 0:
+        return
+    cache_key = (guild_id, channel_id)
+    INVALID_BOT_LOG_CHANNEL_CACHE.add(cache_key)
+    if cache_key in WARNED_INVALID_BOT_LOG_CHANNEL_CACHE:
+        return
+    logger.warning(
+        "Bot log channel %s is unusable for guild %s: %s. Configure a valid per-guild bot log channel in /admin/guild-settings or update Bot_Log_Channel.",
+        channel_id,
+        guild_id if guild_id is not None else "default",
+        reason,
+    )
+    WARNED_INVALID_BOT_LOG_CHANNEL_CACHE.add(cache_key)
+
+
+def bot_can_send_log_messages(client: commands.Bot, channel: discord.TextChannel) -> bool:
+    bot_user = getattr(client, "user", None)
+    guild = getattr(channel, "guild", None)
+    if bot_user is None or guild is None:
+        return True
+    member = guild.get_member(bot_user.id)
+    if member is None:
+        member = getattr(guild, "me", None)
+    if member is None:
+        return True
+    permissions = channel.permissions_for(member)
+    return permissions.view_channel and permissions.send_messages and permissions.embed_links
+
+
 async def get_log_channel(client: commands.Bot, guild_id: int | None = None) -> discord.TextChannel | None:
     channel_id = resolve_bot_log_channel_id(guild_id=guild_id)
     if channel_id <= 0:
         return None
     channel = await get_text_channel(client, channel_id)
     if isinstance(channel, discord.TextChannel):
-        if guild_id is None or channel.guild.id == guild_id:
-            INVALID_BOT_LOG_CHANNEL_CACHE.discard((guild_id, channel_id))
-            WARNED_INVALID_BOT_LOG_CHANNEL_CACHE.discard((guild_id, channel_id))
-            return channel
-    INVALID_BOT_LOG_CHANNEL_CACHE.add((guild_id, channel_id))
+        if guild_id is not None and channel.guild.id != guild_id:
+            warn_invalid_bot_log_channel(
+                guild_id,
+                channel_id,
+                f"channel belongs to guild {channel.guild.id}, not the selected guild",
+            )
+            return None
+        if not bot_can_send_log_messages(client, channel):
+            warn_invalid_bot_log_channel(guild_id, channel_id, "missing View Channel, Send Messages, or Embed Links permission")
+            return None
+        INVALID_BOT_LOG_CHANNEL_CACHE.discard((guild_id, channel_id))
+        WARNED_INVALID_BOT_LOG_CHANNEL_CACHE.discard((guild_id, channel_id))
+        return channel
+    warn_invalid_bot_log_channel(guild_id, channel_id, "channel was not found, accessible, or a text channel")
     return None
 
 
@@ -1800,20 +1859,14 @@ async def log_action(client: commands.Bot, title: str, description: str, color: 
         bot_channel_logger.info("%s | %s", title, description.replace("\n", " | "))
         channel = await get_log_channel(client, guild_id=guild_id)
         if channel is None:
-            resolved_channel_id = resolve_bot_log_channel_id(guild_id=guild_id)
-            cache_key = (guild_id, resolved_channel_id)
-            if cache_key in INVALID_BOT_LOG_CHANNEL_CACHE and cache_key not in WARNED_INVALID_BOT_LOG_CHANNEL_CACHE:
-                logger.warning(
-                    "Bot log channel %s not found, inaccessible, or not a text channel for guild %s.",
-                    resolved_channel_id,
-                    guild_id if guild_id is not None else "default",
-                )
-                WARNED_INVALID_BOT_LOG_CHANNEL_CACHE.add(cache_key)
             return
         embed = discord.Embed(title=title, description=description, color=color)
         for attempt in range(1, BOT_LOG_SEND_MAX_ATTEMPTS + 1):
             try:
                 await channel.send(embed=embed)
+                return
+            except discord.Forbidden as exc:
+                warn_invalid_bot_log_channel(guild_id, channel.id, f"Discord denied access while sending embeds ({exc})")
                 return
             except discord.DiscordServerError as exc:
                 if attempt >= BOT_LOG_SEND_MAX_ATTEMPTS:
@@ -1828,10 +1881,18 @@ async def log_action(client: commands.Bot, title: str, description: str, color: 
                 await asyncio.sleep(BOT_LOG_SEND_RETRY_DELAY_SECONDS * attempt)
             except discord.HTTPException as exc:
                 status = int(getattr(exc, "status", 0) or 0)
+                code = int(getattr(exc, "code", 0) or 0)
                 is_server_error = status >= 500
                 if is_server_error and attempt < BOT_LOG_SEND_MAX_ATTEMPTS:
                     await asyncio.sleep(BOT_LOG_SEND_RETRY_DELAY_SECONDS * attempt)
                     continue
+                if status == 403 or code in {50001, 50013, 10003}:
+                    warn_invalid_bot_log_channel(
+                        guild_id,
+                        channel.id,
+                        f"Discord API rejected the channel (status={status or 'unknown'}, code={code or 'unknown'})",
+                    )
+                    return
                 logger.warning(
                     "Failed to write log action to channel %s for guild %s (status=%s): %s",
                     channel.id,

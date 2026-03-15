@@ -292,12 +292,64 @@ def test_logs_and_wiki_pages_render(tmp_path: Path, monkeypatch) -> None:
     _login(client)
 
     logs_response = client.get("/admin/logs")
-    wiki_response = client.get("/admin/wiki")
+    wiki_redirect = client.get("/admin/wiki", follow_redirects=False)
+    wiki_response = client.get("/admin/wiki", follow_redirects=True)
 
     assert logs_response.status_code == 200
     assert b"Logs" in logs_response.data
+    assert wiki_redirect.status_code == 302
+    assert wiki_redirect.headers["Location"] == "/admin/documentation"
     assert wiki_response.status_code == 200
+    assert b"Documentation" in wiki_response.data
     assert b"Command-Reference.md" in wiki_response.data
+
+
+def test_guilds_page_renders_managed_servers(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+
+    def get_managed_guilds() -> list[dict]:
+        return [
+            {"id": 111111111111111111, "name": "Alpha Guild", "member_count": 42, "is_primary": True},
+            {"id": 222222222222222222, "name": "Beta Guild", "member_count": 13, "is_primary": False},
+        ]
+
+    app = create_app(
+        str(tmp_path / "actions.db"),
+        _bot_snapshot,
+        get_managed_guilds=get_managed_guilds,
+    )
+    client = app.test_client()
+    _login(client)
+
+    response = client.get("/admin/guilds")
+
+    assert response.status_code == 200
+    assert b"Discord Servers" in response.data
+    assert b"Alpha Guild" in response.data
+    assert b"Beta Guild" in response.data
+
+
+def test_documentation_page_renders_selected_wiki_doc(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "Home.md").write_text("# Home\nLanding page\n", encoding="utf-8")
+    (tmp_path / "wiki" / "Command-Reference.md").write_text("# Commands\nPing and logs\n", encoding="utf-8")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+
+    app = create_app(str(tmp_path / "actions.db"), _bot_snapshot)
+    client = app.test_client()
+    _login(client)
+
+    index_response = client.get("/admin/documentation", follow_redirects=False)
+    page_response = client.get("/admin/documentation/Command-Reference")
+
+    assert index_response.status_code == 302
+    assert "/admin/documentation/Home" in index_response.headers["Location"]
+    assert page_response.status_code == 200
+    assert b"Commands" in page_response.data
+    assert b"Ping and logs" in page_response.data
 
 
 def test_observability_and_bot_profile_pages_render(tmp_path: Path, monkeypatch) -> None:
