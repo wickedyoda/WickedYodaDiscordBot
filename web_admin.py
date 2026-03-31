@@ -2260,6 +2260,7 @@ PAGE_TEMPLATE = """
                 <option value="{{ url_for('overview') }}">Overview</option>
                 <option value="{{ url_for('guilds_page') }}">Servers</option>
                 <option value="{{ url_for('guild_settings') }}">Guild Settings</option>
+                <option value="{{ url_for('moderation') }}">Moderation</option>
                 <option value="{{ url_for('command_permissions') }}">Command Permissions</option>
                 <option value="{{ url_for('bot_profile') }}">Bot Profile</option>
                 <option value="{{ url_for('random_user_page') }}">Random User</option>
@@ -2350,6 +2351,7 @@ PAGE_TEMPLATE = """
             <option value="{{ url_for('overview') }}">Overview</option>
             <option value="{{ url_for('guilds_page') }}">Servers</option>
             <option value="{{ url_for('guild_settings') }}">Guild Settings</option>
+            <option value="{{ url_for('moderation') }}">Moderation</option>
             <option value="{{ url_for('command_permissions') }}">Command Permissions</option>
             <option value="{{ url_for('bot_profile') }}">Bot Profile</option>
             <option value="{{ url_for('random_user_page') }}">Random User</option>
@@ -2659,6 +2661,13 @@ PAGE_TEMPLATE = """
               <p class="text-secondary">Recent moderation events and audits.</p>
               <div class="dash-actions">
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('actions') }}">View Actions</a>
+              </div>
+            </div>
+            <div class="card dash-card">
+              <h3>Moderation</h3>
+              <p class="text-secondary">Bad word filters, warnings, and auto-timeout rules.</p>
+              <div class="dash-actions">
+                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('moderation') }}">Open Moderation</a>
               </div>
             </div>
             <div class="card dash-card">
@@ -4346,6 +4355,63 @@ PAGE_TEMPLATE = """
             <div class="form-text">Optional override for uptime monitor alerts; falls back to the bot log channel when unset.</div>
           </div>
           <button class="btn btn-primary" type="submit" {% if not can_manage_guild %}disabled{% endif %}>Save Guild Settings</button>
+        </form>
+      </div>
+    {% elif page == "moderation" %}
+      <div class="card card-soft p-3">
+        <h1 class="h5 mb-3">Moderation</h1>
+        <p class="text-secondary small mb-3">Configure per-guild bad word filters, warning limits, and automated actions.</p>
+        <form method="post" action="{{ url_for('moderation') }}">
+          <div class="mb-3">
+            <label class="form-label" for="moderation_enabled">Moderation Filter</label>
+            <select class="form-select" id="moderation_enabled" name="moderation_enabled" {% if not can_manage_guild %}disabled{% endif %}>
+              <option value="0" {% if not moderation_settings.moderation_enabled %}selected{% endif %}>Disabled</option>
+              <option value="1" {% if moderation_settings.moderation_enabled %}selected{% endif %}>Enabled</option>
+            </select>
+            <div class="form-text">When enabled, messages containing banned words trigger warnings.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="moderation_words">Banned Words (one per line)</label>
+            <textarea class="form-control" id="moderation_words" name="moderation_words" rows="6" {% if not can_manage_guild %}disabled{% endif %}>{{ moderation_words_text }}</textarea>
+            <div class="form-text">Use single words or short phrases. Matching is case-insensitive.</div>
+          </div>
+          <div class="row g-3">
+            <div class="col-12 col-md-4">
+              <label class="form-label" for="moderation_warning_window_hours">Warning Window</label>
+              <select class="form-select" id="moderation_warning_window_hours" name="moderation_warning_window_hours" {% if not can_manage_guild %}disabled{% endif %}>
+                {% for value in moderation_window_options %}
+                <option value="{{ value }}" {% if moderation_settings.moderation_warning_window_hours == value %}selected{% endif %}>{{ value }} hours</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label" for="moderation_warning_threshold">Max Warnings</label>
+              <select class="form-select" id="moderation_warning_threshold" name="moderation_warning_threshold" {% if not can_manage_guild %}disabled{% endif %}>
+                {% for value in moderation_threshold_options %}
+                <option value="{{ value }}" {% if moderation_settings.moderation_warning_threshold == value %}selected{% endif %}>{{ value }} warnings</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label" for="moderation_action">Action</label>
+              <select class="form-select" id="moderation_action" name="moderation_action" {% if not can_manage_guild %}disabled{% endif %}>
+                <option value="timeout" {% if moderation_settings.moderation_action == "timeout" %}selected{% endif %}>Timeout / Mute</option>
+                <option value="warn_only" {% if moderation_settings.moderation_action == "warn_only" %}selected{% endif %}>Warn Only</option>
+              </select>
+            </div>
+          </div>
+          <div class="row g-3 mt-1">
+            <div class="col-12 col-md-4">
+              <label class="form-label" for="moderation_timeout_minutes">Timeout Duration</label>
+              <select class="form-select" id="moderation_timeout_minutes" name="moderation_timeout_minutes" {% if not can_manage_guild %}disabled{% endif %}>
+                {% for value in moderation_timeout_options %}
+                <option value="{{ value }}" {% if moderation_settings.moderation_timeout_minutes == value %}selected{% endif %}>{{ value }} minutes</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">Only used when action is Timeout.</div>
+            </div>
+          </div>
+          <button class="btn btn-primary mt-3" type="submit" {% if not can_manage_guild %}disabled{% endif %}>Save Moderation Settings</button>
         </form>
       </div>
     {% elif page == "settings" %}
@@ -6623,6 +6689,53 @@ def create_app(
             notification_channels=channel_options,
             selected_log_channel_id=selected_log_channel_id,
             selected_uptime_channel_id=selected_uptime_channel_id,
+        )
+
+    @app.route("/admin/moderation", methods=["GET", "POST"])
+    @login_required
+    def moderation():
+        selected_guild_id, _, _ = _selected_guild_context()
+        if request.method == "POST":
+            if not _current_user_can_manage_guild():
+                return _reject_read_only_write("moderation")
+            payload = {
+                "moderation_enabled": request.form.get("moderation_enabled", "").strip(),
+                "moderation_words": request.form.get("moderation_words", ""),
+                "moderation_warning_window_hours": request.form.get("moderation_warning_window_hours", "").strip(),
+                "moderation_warning_threshold": request.form.get("moderation_warning_threshold", "").strip(),
+                "moderation_action": request.form.get("moderation_action", "").strip(),
+                "moderation_timeout_minutes": request.form.get("moderation_timeout_minutes", "").strip(),
+            }
+            result = _call_save_guild_settings(payload, str(session.get("user", "")), selected_guild_id)
+            if isinstance(result, dict) and result.get("ok"):
+                flash("Moderation settings updated.", "success")
+            else:
+                flash(
+                    str(result.get("error", "Failed to update moderation settings."))
+                    if isinstance(result, dict)
+                    else "Failed to update moderation settings.",
+                    "danger",
+                )
+
+        settings_payload = _call_get_guild_settings(selected_guild_id)
+        moderation_settings = settings_payload if isinstance(settings_payload, dict) else {}
+        moderation_settings = {
+            "moderation_enabled": bool(int(moderation_settings.get("moderation_enabled", 0) or 0)),
+            "moderation_words": moderation_settings.get("moderation_words") or [],
+            "moderation_warning_window_hours": int(moderation_settings.get("moderation_warning_window_hours", 72) or 72),
+            "moderation_warning_threshold": int(moderation_settings.get("moderation_warning_threshold", 3) or 3),
+            "moderation_action": str(moderation_settings.get("moderation_action") or "timeout"),
+            "moderation_timeout_minutes": int(moderation_settings.get("moderation_timeout_minutes", 10) or 10),
+        }
+        moderation_words_text = "\n".join([str(word) for word in moderation_settings["moderation_words"] if str(word).strip()])
+        return _render_page(
+            "moderation",
+            "Moderation",
+            moderation_settings=moderation_settings,
+            moderation_words_text=moderation_words_text,
+            moderation_window_options=[24, 48, 72, 96, 168],
+            moderation_threshold_options=[1, 2, 3, 4, 5],
+            moderation_timeout_options=[5, 10, 30, 60, 120, 1440],
         )
 
     @app.get("/admin/users")
