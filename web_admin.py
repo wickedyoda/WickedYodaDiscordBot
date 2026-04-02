@@ -2194,12 +2194,23 @@ PAGE_TEMPLATE = """
     @media (max-width: 1180px) {
       .dashboard-hero { grid-template-columns: 1fr; }
     }
+    @media (max-width: 1024px) {
+      .wrap { max-width: 960px; }
+      .dashboard-section-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .dashboard-pill-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .dashboard-hero-main,
+      .dashboard-hero-side,
+      .dash-card { padding-top: 16px; }
+      .nav-controls { gap: 8px; }
+      .nav-select { width: 240px; }
+    }
     @media (max-width: 1080px) { .dash-grid { grid-template-columns: 1fr 1fr; } }
     @media (max-width: 900px) {
       .grid { grid-template-columns: 1fr; }
       .dash-grid { grid-template-columns: 1fr; }
       .dashboard-section-head { align-items: start; flex-direction: column; }
       .dashboard-section-grid { grid-template-columns: 1fr 1fr; }
+      .dashboard-pill-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
       header { padding: 10px 12px; align-items: center; }
       .wrap { margin: 14px auto; padding: 0 10px; }
       .card { padding: 14px; }
@@ -2216,19 +2227,21 @@ PAGE_TEMPLATE = """
       .dash-actions .btn { width: 100%; }
       .dashboard-pill { min-width: 0; flex: 1 1 180px; }
       th, td { padding: 8px; }
-      .table-wrap > table { min-width: 680px; }
-      .table-wrap table { min-width: 560px; }
+      .table-wrap > table { min-width: 600px; }
+      .table-wrap table { min-width: 520px; }
       .mobile-pre { max-height: 48vh; font-size: .875rem; }
       .documentation-sidebar { max-height: none; }
     }
     @media (max-width: 600px) {
       .card { border-radius: 10px; }
-      .table-wrap > table { min-width: 620px; }
+      .table-wrap > table { min-width: 520px; }
       .header-toprow { flex-direction: column; align-items: stretch; }
       .header-tools { width: 100%; flex-direction: column; align-items: stretch; }
       .dashboard-section-grid { grid-template-columns: 1fr; }
-      .dashboard-pill-row { display: grid; grid-template-columns: 1fr 1fr; }
+      .dashboard-pill-row { display: grid; grid-template-columns: 1fr; }
       .dashboard-pill { min-width: 0; }
+      .dashboard-pill span { font-size: 0.92rem; }
+      .header-version { font-size: 0.74rem; }
       .mobile-link-grid { grid-template-columns: 1fr; }
       main.container { padding-top: 1rem !important; padding-bottom: 1.25rem !important; }
     }
