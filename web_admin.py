@@ -5258,7 +5258,7 @@ def create_app(
     def enforce_post_security():
         if request.method != "POST":
             return None
-        if request.endpoint in {"healthz"}:
+        if request.endpoint in {"healthz", "health"}:
             return None
 
         if enforce_csrf and request.endpoint not in {"login"}:
@@ -5294,7 +5294,7 @@ def create_app(
         endpoint = str(request.endpoint or "").strip()
         if not endpoint or endpoint.startswith("static"):
             return None
-        if endpoint in {"login", "logout", "account", "healthz", "public_status", "public_status_everything"}:
+        if endpoint in {"login", "logout", "account", "healthz", "health", "public_status", "public_status_everything"}:
             return None
         user = _current_user()
         if user is None or not bool(session.get("password_rotation_required")):
@@ -5305,6 +5305,22 @@ def create_app(
     @app.get("/healthz")
     def healthz():
         return {"status": "ok", "timestamp": datetime.now(UTC).isoformat()}
+
+    @app.get("/health")
+    def health():
+        snapshot = get_bot_snapshot() if callable(get_bot_snapshot) else {}
+        ready = bool(snapshot.get("bot_ready"))
+        status = "ok" if ready else "starting"
+        payload = {
+            "status": status,
+            "bot_ready": ready,
+            "bot_name": snapshot.get("bot_name"),
+            "guild_count": snapshot.get("guild_count"),
+            "commands_synced": snapshot.get("commands_synced"),
+            "latency_ms": snapshot.get("latency_ms"),
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+        return payload, 200 if ready else 503
 
     @app.after_request
     def add_security_headers(response):
@@ -5330,7 +5346,7 @@ def create_app(
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
         started = request.environ.get("wickedyoda_request_start")
         duration_ms = int(max(0.0, (time.perf_counter() - float(started)) * 1000.0)) if isinstance(started, float) else -1
-        if request.endpoint != "healthz":
+        if request.endpoint not in {"healthz", "health"}:
             audit_logger.info(
                 "WEB_AUDIT method=%s path=%s endpoint=%s status=%s ip=%s user=%s duration_ms=%s",
                 request.method,

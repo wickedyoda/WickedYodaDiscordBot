@@ -5341,6 +5341,7 @@ class ModerationBot(commands.Bot):
         managed = self.get_managed_guilds()
         return {
             "bot_name": str(self.user) if self.user else "Starting...",
+            "bot_ready": bool(self.is_ready()),
             "guild_id": GUILD_ID,
             "guild_count": len(managed),
             "latency_ms": latency_ms,

@@ -153,6 +153,7 @@ SQLite storage is internal to the container at `/app/data/mod_actions.db`.
 
 - HTTP URL: `http://localhost:8080`
 - HTTPS URL: `https://localhost:8081`
+- Health check (ready): `http://localhost:8080/health` (returns `200` only when Discord bot is ready)
 - Login: `WEB_ADMIN_DEFAULT_USERNAME` / `WEB_ADMIN_DEFAULT_PASSWORD`
 - If `WEB_TLS_ENABLED=true` and cert/key files are not set, Flask runs with an adhoc self-signed certificate (requires `cryptography`, included in this image).
 - Use the guild dropdown in the top nav to switch the server you are managing.
