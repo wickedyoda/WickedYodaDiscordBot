@@ -485,6 +485,63 @@ PAGE_TEMPLATE = """
     .documentation-link.active .small {
       color: rgba(255, 255, 255, 0.78) !important;
     }
+    .guild-context-card {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .guild-context-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .guild-context-meta {
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+    .guild-context-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .guild-context-switch {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: end;
+    }
+    .collapsible-card {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--card);
+      overflow: hidden;
+    }
+    .collapsible-card > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 14px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      font-weight: 600;
+    }
+    .collapsible-card > summary::-webkit-details-marker { display: none; }
+    .collapsible-card > summary::after {
+      content: "+";
+      color: var(--muted);
+      font-size: 1.1rem;
+      line-height: 1;
+    }
+    .collapsible-card[open] > summary::after { content: "−"; }
+    .collapsible-card-body {
+      border-top: 1px solid var(--border);
+      padding: 16px;
+    }
     @media (max-width: 1180px) {
       .dashboard-hero { grid-template-columns: 1fr; }
     }
@@ -521,6 +578,7 @@ PAGE_TEMPLATE = """
       .dash-actions .btn { width: 100%; }
       .dashboard-pill { min-width: 0; flex: 1 1 180px; }
       th, td { padding: 8px; }
+      .guild-context-switch { grid-template-columns: 1fr; }
       .table-wrap > table { min-width: 600px; }
       .table-wrap table { min-width: 520px; }
       .mobile-pre { max-height: 48vh; font-size: .875rem; }
@@ -709,8 +767,43 @@ PAGE_TEMPLATE = """
       {% endif %}
     {% endwith %}
 
-    {% if session.get("user") and selected_guild_name %}
-    <p class="small text-secondary mb-3">Managing guild: <strong>{{ selected_guild_name }}</strong> ({{ selected_guild_id }})</p>
+    {% if session.get("user") and guild_options %}
+    <div class="card card-soft guild-context-card">
+      <div class="guild-context-top">
+        <div>
+          <h1 class="h5 mb-1">{{ selected_guild_name or "No server selected" }}</h1>
+          <div class="guild-context-meta">
+            {% if selected_guild_id %}
+            Guild ID: <code>{{ selected_guild_id }}</code><br>
+            All guild-scoped options and actions on this page apply only to the selected guild.
+            {% else %}
+            Select a guild to manage per-server settings and moderation actions.
+            {% endif %}
+          </div>
+        </div>
+        {% if selected_guild_id %}
+        <div class="guild-context-actions">
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('guilds_page') }}">Servers</a>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('moderation') }}">Moderation</a>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('guild_settings') }}">Guild Settings</a>
+        </div>
+        {% endif %}
+      </div>
+      <form method="post" action="{{ url_for('select_guild') }}" class="guild-context-switch">
+        <div>
+          <label class="form-label small mb-1" for="persistent-guild-switch">Switch Guild</label>
+          <select id="persistent-guild-switch" name="guild_id" class="form-select form-select-sm">
+            {% for guild in guild_options %}
+            <option value="{{ guild.id }}" {% if selected_guild_id == guild.id %}selected{% endif %}>{{ guild.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <input type="hidden" name="next_endpoint" value="{{ request.endpoint or 'dashboard' }}">
+          <button class="btn btn-primary btn-sm" type="submit">Switch</button>
+        </div>
+      </form>
+    </div>
     {% endif %}
     {% if session.get("user") and not session.get("is_admin") and not session.get("is_guild_admin") %}
     <div class="alert alert-info">Read-only account: you can view pages, but admin changes are restricted.</div>
@@ -2011,48 +2104,26 @@ PAGE_TEMPLATE = """
       <div class="card card-soft p-3 mb-3">
         <h1 class="h5 mb-2">Discord Servers</h1>
         <p class="text-secondary mb-0">Choose which server the web GUI is currently managing. Guild-scoped pages use the selected server context.</p>
-            <div class="card card-soft p-3 mb-3">
-        <div class="d-flex align-items-center justify-content-between mb-2">
-          <h2 class="h6 mb-0">Command Status</h2>
-          <a class="small" href="{{ url_for('command_permissions') }}">Manage</a>
-        </div>
-        {% if command_statuses %}
-        <div class="table-wrap">
-          <table class="table table-sm align-middle">
-            <thead>
-              <tr>
-                <th>Command</th>
-                <th>Access</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for command in command_statuses %}
-              <tr>
-                <td>
-                  <div class="fw-semibold">{{ command.label }}</div>
-                  {% if command.description %}
-                  <div class="text-secondary small">{{ command.description }}</div>
-                  {% endif %}
-                </td>
-                <td class="small">{{ command.access }}</td>
-                <td>
-                  {% if command.enabled %}
-                  <span class="badge text-bg-success">Enabled</span>
-                  {% else %}
-                  <span class="badge text-bg-secondary">Disabled</span>
-                  {% endif %}
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <p class="text-secondary small mb-0">Command status is unavailable.</p>
-        {% endif %}
       </div>
-</div>
+      {% if selected_guild_card %}
+      <div class="card card-soft p-3 mb-3">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+          <div>
+            <h2 class="h6 mb-1">Selected Guild Summary</h2>
+            <p class="mb-1">{{ selected_guild_card.name }}</p>
+            <p class="text-secondary small mb-0">
+              ID: <code>{{ selected_guild_card.id }}</code>
+              {% if selected_guild_card.member_count is not none %} | Members: {{ selected_guild_card.member_count }}{% endif %}
+            </p>
+          </div>
+          <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('moderation') }}">Open Moderation</a>
+            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('guild_settings') }}">Guild Settings</a>
+            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('command_permissions') }}">Command Permissions</a>
+          </div>
+        </div>
+      </div>
+      {% endif %}
       <div class="row g-3">
         {% for guild in guild_cards %}
         <div class="col-12 col-lg-6">
@@ -2081,194 +2152,6 @@ PAGE_TEMPLATE = """
               <input type="hidden" name="guild_id" value="{{ guild.id }}">
               <button class="btn btn-outline-danger btn-sm guild-card-action" type="submit">Leave Guild</button>
             </form>
-            {% endif %}
-            {% if can_manage_guild and guild.selected %}
-            <div class="border-top pt-3 mt-3">
-              <h3 class="h6 mb-2">Moderate Members</h3>
-              {% if guild_member_options %}
-              <div class="row g-3">
-                <div class="col-12 col-xl-6">
-                  <form method="post" action="{{ url_for('kick_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Kick the selected member from {{ guild.name|escape }}?');">
-                    <input type="hidden" name="guild_id" value="{{ guild.id }}">
-                    <h4 class="h6 mb-2">Kick</h4>
-                    <div class="mb-2">
-                      <label class="form-label small" for="guild-kick-member-{{ guild.id }}">Member</label>
-                      <select class="form-select form-select-sm" id="guild-kick-member-{{ guild.id }}" name="member_id" required>
-                        <option value="">Select a member</option>
-                        {% for option in guild_member_options %}
-                        <option value="{{ option.value }}">{{ option.label }}</option>
-                        {% endfor %}
-                      </select>
-                    </div>
-                    <div class="mb-2">
-                      <label class="form-label small" for="guild-kick-reason-{{ guild.id }}">Reason</label>
-                      <input class="form-control form-control-sm" id="guild-kick-reason-{{ guild.id }}" type="text" name="reason" maxlength="256" placeholder="Web admin kick request">
-                    </div>
-                    <button class="btn btn-outline-danger btn-sm guild-card-action" type="submit">Kick Member</button>
-                  </form>
-                </div>
-                <div class="col-12 col-xl-6">
-                  <form method="post" action="{{ url_for('ban_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Ban the selected member from {{ guild.name|escape }}?');">
-                    <input type="hidden" name="guild_id" value="{{ guild.id }}">
-                    <h4 class="h6 mb-2">Ban</h4>
-                    <div class="mb-2">
-                      <label class="form-label small" for="guild-ban-member-{{ guild.id }}">Member</label>
-                      <select class="form-select form-select-sm" id="guild-ban-member-{{ guild.id }}" name="member_id" required>
-                        <option value="">Select a member</option>
-                        {% for option in guild_member_options %}
-                        <option value="{{ option.value }}">{{ option.label }}</option>
-                        {% endfor %}
-                      </select>
-                    </div>
-                    <div class="mb-2">
-                      <label class="form-label small" for="guild-ban-delete-days-{{ guild.id }}">Delete Message History</label>
-                      <select class="form-select form-select-sm" id="guild-ban-delete-days-{{ guild.id }}" name="delete_days">
-                        {% for day in range(0, 8) %}
-                        <option value="{{ day }}">{{ day }} day{% if day != 1 %}s{% endif %}</option>
-                        {% endfor %}
-                      </select>
-                    </div>
-                    <div class="mb-2">
-                      <label class="form-label small" for="guild-ban-reason-{{ guild.id }}">Reason</label>
-                      <input class="form-control form-control-sm" id="guild-ban-reason-{{ guild.id }}" type="text" name="reason" maxlength="256" placeholder="Web admin ban request">
-                    </div>
-                    <button class="btn btn-outline-danger btn-sm guild-card-action" type="submit">Ban Member</button>
-                  </form>
-                </div>
-                <div class="col-12 col-xl-6">
-                  <form method="post" action="{{ url_for('timeout_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Timeout the selected member in {{ guild.name|escape }}?');">
-                    <input type="hidden" name="guild_id" value="{{ guild.id }}">
-                    <h4 class="h6 mb-2">Timeout</h4>
-                    <div class="mb-2">
-                      <label class="form-label small" for="guild-timeout-member-{{ guild.id }}">Member</label>
-                      <select class="form-select form-select-sm" id="guild-timeout-member-{{ guild.id }}" name="member_id" required>
-                        <option value="">Select a member</option>
-                        {% for option in guild_member_options %}
-                        <option value="{{ option.value }}">{{ option.label }}</option>
-                        {% endfor %}
-                      </select>
-                    </div>
-                    <div class="mb-2">
-                      <label class="form-label small" for="guild-timeout-minutes-{{ guild.id }}">Minutes</label>
-                      <select class="form-select form-select-sm" id="guild-timeout-minutes-{{ guild.id }}" name="minutes">
-                        <option value="5">5 minutes</option>
-                        <option value="10">10 minutes</option>
-                        <option value="30">30 minutes</option>
-                        <option value="60">1 hour</option>
-                        <option value="360">6 hours</option>
-                        <option value="1440">24 hours</option>
-                        <option value="10080">7 days</option>
-                      </select>
-                    </div>
-                    <div class="mb-2">
-                      <label class="form-label small" for="guild-timeout-reason-{{ guild.id }}">Reason</label>
-                      <input class="form-control form-control-sm" id="guild-timeout-reason-{{ guild.id }}" type="text" name="reason" maxlength="256" placeholder="Web admin timeout request">
-                    </div>
-                    <button class="btn btn-outline-warning btn-sm guild-card-action" type="submit">Timeout Member</button>
-                  </form>
-                </div>
-                <div class="col-12 col-xl-6">
-                  <form method="post" action="{{ url_for('untimeout_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Remove timeout for the selected member in {{ guild.name|escape }}?');">
-                    <input type="hidden" name="guild_id" value="{{ guild.id }}">
-                    <h4 class="h6 mb-2">Remove Timeout</h4>
-                    <div class="mb-2">
-                      <label class="form-label small" for="guild-untimeout-member-{{ guild.id }}">Member</label>
-                      <select class="form-select form-select-sm" id="guild-untimeout-member-{{ guild.id }}" name="member_id" required>
-                        <option value="">Select a member</option>
-                        {% for option in guild_member_options %}
-                        <option value="{{ option.value }}">{{ option.label }}</option>
-                        {% endfor %}
-                      </select>
-                    </div>
-                    <div class="mb-2">
-                      <label class="form-label small" for="guild-untimeout-reason-{{ guild.id }}">Reason</label>
-                      <input class="form-control form-control-sm" id="guild-untimeout-reason-{{ guild.id }}" type="text" name="reason" maxlength="256" placeholder="Web admin untimeout request">
-                    </div>
-                    <button class="btn btn-outline-primary btn-sm guild-card-action" type="submit">Remove Timeout</button>
-                  </form>
-                </div>
-              </div>
-              {% elif not members_intent_enabled %}
-              <p class="text-secondary small mb-0">Member picker is limited because `ENABLE_MEMBERS_INTENT` is disabled. Enable it to manage the full guild roster from the web GUI.</p>
-              {% else %}
-              <p class="text-secondary small mb-0">No kickable members are currently available in this guild.</p>
-              {% endif %}
-            </div>
-            <div class="border-top pt-3 mt-3">
-              <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
-                <h3 class="h6 mb-0">Visible Members</h3>
-                {% if guild_members %}
-                <span class="badge text-bg-secondary" data-member-count>{{ guild_members|length }}</span>
-                {% endif %}
-              </div>
-              {% if guild_members %}
-              <div class="row g-2 align-items-end mb-2">
-                <div class="col-12 col-md-8">
-                  <label class="form-label small" for="guild-member-search-{{ guild.id }}">Search Members</label>
-                  <input
-                    class="form-control form-control-sm"
-                    id="guild-member-search-{{ guild.id }}"
-                    type="search"
-                    placeholder="Filter by display name, username, or ID"
-                    data-member-search
-                    data-member-search-target="guild-member-table-{{ guild.id }}"
-                    data-member-count-target="guild-member-count-{{ guild.id }}"
-                    data-member-page-target="guild-member-pagination-{{ guild.id }}"
-                  >
-                </div>
-                <div class="col-12 col-md-4">
-                  <label class="form-label small" for="guild-member-page-size-{{ guild.id }}">Rows Per Page</label>
-                  <select
-                    class="form-select form-select-sm"
-                    id="guild-member-page-size-{{ guild.id }}"
-                    data-member-page-size
-                    data-member-search-target="guild-member-table-{{ guild.id }}"
-                    data-member-count-target="guild-member-count-{{ guild.id }}"
-                    data-member-page-target="guild-member-pagination-{{ guild.id }}"
-                  >
-                    <option value="10">10</option>
-                    <option value="25" selected>25</option>
-                    <option value="50">50</option>
-                    <option value="100">100</option>
-                  </select>
-                </div>
-                <div class="col-12">
-                  <p class="text-secondary small mt-1 mb-0" id="guild-member-count-{{ guild.id }}">Showing {{ [guild_members|length, 25]|min }} of {{ guild_members|length }} visible members.</p>
-                </div>
-              </div>
-              <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0" id="guild-member-table-{{ guild.id }}">
-                  <thead>
-                    <tr>
-                      <th scope="col">Display Name</th>
-                      <th scope="col">Discord User</th>
-                      <th scope="col">ID</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for member in guild_members %}
-                    <tr data-member-row data-member-search-text="{{ (member.name ~ ' ' ~ member.username ~ ' ' ~ member.id)|lower }}">
-                      <td>{{ member.name }}</td>
-                      <td class="text-secondary small">{{ member.username }}</td>
-                      <td class="text-secondary small">{{ member.id }}</td>
-                    </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-              <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mt-3" id="guild-member-pagination-{{ guild.id }}">
-                <p class="text-secondary small mb-0" data-member-page-status>Page 1</p>
-                <div class="d-flex gap-2">
-                  <button class="btn btn-outline-secondary btn-sm" type="button" data-member-prev>Previous</button>
-                  <button class="btn btn-outline-secondary btn-sm" type="button" data-member-next>Next</button>
-                </div>
-              </div>
-              {% elif not members_intent_enabled %}
-              <p class="text-secondary small mb-0">Member list visibility is limited because `ENABLE_MEMBERS_INTENT` is disabled.</p>
-              {% else %}
-              <p class="text-secondary small mb-0">No members are currently visible for this guild.</p>
-              {% endif %}
-            </div>
             {% endif %}
           </div>
         </div>
@@ -2853,62 +2736,261 @@ PAGE_TEMPLATE = """
         </form>
       </div>
     {% elif page == "moderation" %}
-      <div class="card card-soft p-3">
-        <h1 class="h5 mb-3">Moderation</h1>
-        <p class="text-secondary small mb-3">Configure per-guild bad word filters, warning limits, and automated actions.</p>
-        <form method="post" action="{{ url_for('moderation') }}">
-          <div class="mb-3">
-            <label class="form-label" for="moderation_enabled">Moderation Filter</label>
-            <select class="form-select" id="moderation_enabled" name="moderation_enabled" {% if not can_manage_guild %}disabled{% endif %}>
-              <option value="0" {% if not moderation_settings.moderation_enabled %}selected{% endif %}>Disabled</option>
-              <option value="1" {% if moderation_settings.moderation_enabled %}selected{% endif %}>Enabled</option>
-            </select>
-            <div class="form-text">When enabled, messages containing banned words trigger warnings.</div>
-          </div>
-          <div class="mb-3">
-            <label class="form-label" for="moderation_words">Banned Words (one per line)</label>
-            <textarea class="form-control" id="moderation_words" name="moderation_words" rows="6" {% if not can_manage_guild %}disabled{% endif %}>{{ moderation_words_text }}</textarea>
-            <div class="form-text">Use single words or short phrases. Matching is case-insensitive.</div>
-          </div>
-          <div class="row g-3">
-            <div class="col-12 col-md-4">
-              <label class="form-label" for="moderation_warning_window_hours">Warning Window</label>
-              <select class="form-select" id="moderation_warning_window_hours" name="moderation_warning_window_hours" {% if not can_manage_guild %}disabled{% endif %}>
-                {% for value in moderation_window_options %}
-                <option value="{{ value }}" {% if moderation_settings.moderation_warning_window_hours == value %}selected{% endif %}>{{ value }} hours</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="col-12 col-md-4">
-              <label class="form-label" for="moderation_warning_threshold">Max Warnings</label>
-              <select class="form-select" id="moderation_warning_threshold" name="moderation_warning_threshold" {% if not can_manage_guild %}disabled{% endif %}>
-                {% for value in moderation_threshold_options %}
-                <option value="{{ value }}" {% if moderation_settings.moderation_warning_threshold == value %}selected{% endif %}>{{ value }} warnings</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="col-12 col-md-4">
-              <label class="form-label" for="moderation_action">Action</label>
-              <select class="form-select" id="moderation_action" name="moderation_action" {% if not can_manage_guild %}disabled{% endif %}>
-                <option value="timeout" {% if moderation_settings.moderation_action == "timeout" %}selected{% endif %}>Timeout / Mute</option>
-                <option value="warn_only" {% if moderation_settings.moderation_action == "warn_only" %}selected{% endif %}>Warn Only</option>
-              </select>
-            </div>
-          </div>
-          <div class="row g-3 mt-1">
-            <div class="col-12 col-md-4">
-              <label class="form-label" for="moderation_timeout_minutes">Timeout Duration</label>
-              <select class="form-select" id="moderation_timeout_minutes" name="moderation_timeout_minutes" {% if not can_manage_guild %}disabled{% endif %}>
-                {% for value in moderation_timeout_options %}
-                <option value="{{ value }}" {% if moderation_settings.moderation_timeout_minutes == value %}selected{% endif %}>{{ value }} minutes</option>
-                {% endfor %}
-              </select>
-              <div class="form-text">Only used when action is Timeout.</div>
-            </div>
-          </div>
-          <button class="btn btn-primary mt-3" type="submit" {% if not can_manage_guild %}disabled{% endif %}>Save Moderation Settings</button>
-        </form>
+      <div class="card card-soft p-3 mb-3">
+        <h1 class="h5 mb-1">Moderation</h1>
+        <p class="text-secondary small mb-0">All moderation controls below apply only to the currently selected guild.</p>
       </div>
+      <details class="collapsible-card mb-3" open>
+        <summary>
+          <span>Filter Settings</span>
+          <span class="text-secondary small">Warnings, banned words, and automatic actions</span>
+        </summary>
+        <div class="collapsible-card-body">
+          <form method="post" action="{{ url_for('moderation') }}">
+            <div class="mb-3">
+              <label class="form-label" for="moderation_enabled">Moderation Filter</label>
+              <select class="form-select" id="moderation_enabled" name="moderation_enabled" {% if not can_manage_guild %}disabled{% endif %}>
+                <option value="0" {% if not moderation_settings.moderation_enabled %}selected{% endif %}>Disabled</option>
+                <option value="1" {% if moderation_settings.moderation_enabled %}selected{% endif %}>Enabled</option>
+              </select>
+              <div class="form-text">When enabled, messages containing banned words trigger warnings.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="moderation_words">Banned Words (one per line)</label>
+              <textarea class="form-control" id="moderation_words" name="moderation_words" rows="6" {% if not can_manage_guild %}disabled{% endif %}>{{ moderation_words_text }}</textarea>
+              <div class="form-text">Use single words or short phrases. Matching is case-insensitive.</div>
+            </div>
+            <div class="row g-3">
+              <div class="col-12 col-md-4">
+                <label class="form-label" for="moderation_warning_window_hours">Warning Window</label>
+                <select class="form-select" id="moderation_warning_window_hours" name="moderation_warning_window_hours" {% if not can_manage_guild %}disabled{% endif %}>
+                  {% for value in moderation_window_options %}
+                  <option value="{{ value }}" {% if moderation_settings.moderation_warning_window_hours == value %}selected{% endif %}>{{ value }} hours</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-12 col-md-4">
+                <label class="form-label" for="moderation_warning_threshold">Max Warnings</label>
+                <select class="form-select" id="moderation_warning_threshold" name="moderation_warning_threshold" {% if not can_manage_guild %}disabled{% endif %}>
+                  {% for value in moderation_threshold_options %}
+                  <option value="{{ value }}" {% if moderation_settings.moderation_warning_threshold == value %}selected{% endif %}>{{ value }} warnings</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-12 col-md-4">
+                <label class="form-label" for="moderation_action">Action</label>
+                <select class="form-select" id="moderation_action" name="moderation_action" {% if not can_manage_guild %}disabled{% endif %}>
+                  <option value="timeout" {% if moderation_settings.moderation_action == "timeout" %}selected{% endif %}>Timeout / Mute</option>
+                  <option value="warn_only" {% if moderation_settings.moderation_action == "warn_only" %}selected{% endif %}>Warn Only</option>
+                </select>
+              </div>
+            </div>
+            <div class="row g-3 mt-1">
+              <div class="col-12 col-md-4">
+                <label class="form-label" for="moderation_timeout_minutes">Timeout Duration</label>
+                <select class="form-select" id="moderation_timeout_minutes" name="moderation_timeout_minutes" {% if not can_manage_guild %}disabled{% endif %}>
+                  {% for value in moderation_timeout_options %}
+                  <option value="{{ value }}" {% if moderation_settings.moderation_timeout_minutes == value %}selected{% endif %}>{{ value }} minutes</option>
+                  {% endfor %}
+                </select>
+                <div class="form-text">Only used when action is Timeout.</div>
+              </div>
+            </div>
+            <button class="btn btn-primary mt-3" type="submit" {% if not can_manage_guild %}disabled{% endif %}>Save Moderation Settings</button>
+          </form>
+        </div>
+      </details>
+      <details class="collapsible-card mb-3">
+        <summary>
+          <span>Member Actions</span>
+          <span class="text-secondary small">Kick, ban, timeout, and remove timeout</span>
+        </summary>
+        <div class="collapsible-card-body">
+          {% if guild_member_options %}
+          <div class="row g-3">
+            <div class="col-12 col-xl-6">
+              <form method="post" action="{{ url_for('kick_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Kick the selected member from {{ selected_guild_name|escape }}?');">
+                <input type="hidden" name="guild_id" value="{{ selected_guild_id }}">
+                <h4 class="h6 mb-2">Kick</h4>
+                <div class="mb-2">
+                  <label class="form-label small" for="moderation-kick-member">Member</label>
+                  <select class="form-select form-select-sm" id="moderation-kick-member" name="member_id" required>
+                    <option value="">Select a member</option>
+                    {% for option in guild_member_options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small" for="moderation-kick-reason">Reason</label>
+                  <input class="form-control form-control-sm" id="moderation-kick-reason" type="text" name="reason" maxlength="256" placeholder="Web admin kick request">
+                </div>
+                <button class="btn btn-outline-danger btn-sm guild-card-action" type="submit" {% if not can_manage_guild %}disabled{% endif %}>Kick Member</button>
+              </form>
+            </div>
+            <div class="col-12 col-xl-6">
+              <form method="post" action="{{ url_for('ban_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Ban the selected member from {{ selected_guild_name|escape }}?');">
+                <input type="hidden" name="guild_id" value="{{ selected_guild_id }}">
+                <h4 class="h6 mb-2">Ban</h4>
+                <div class="mb-2">
+                  <label class="form-label small" for="moderation-ban-member">Member</label>
+                  <select class="form-select form-select-sm" id="moderation-ban-member" name="member_id" required>
+                    <option value="">Select a member</option>
+                    {% for option in guild_member_options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small" for="moderation-ban-delete-days">Delete Message History</label>
+                  <select class="form-select form-select-sm" id="moderation-ban-delete-days" name="delete_days">
+                    {% for day in range(0, 8) %}
+                    <option value="{{ day }}">{{ day }} day{% if day != 1 %}s{% endif %}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small" for="moderation-ban-reason">Reason</label>
+                  <input class="form-control form-control-sm" id="moderation-ban-reason" type="text" name="reason" maxlength="256" placeholder="Web admin ban request">
+                </div>
+                <button class="btn btn-outline-danger btn-sm guild-card-action" type="submit" {% if not can_manage_guild %}disabled{% endif %}>Ban Member</button>
+              </form>
+            </div>
+            <div class="col-12 col-xl-6">
+              <form method="post" action="{{ url_for('timeout_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Timeout the selected member in {{ selected_guild_name|escape }}?');">
+                <input type="hidden" name="guild_id" value="{{ selected_guild_id }}">
+                <h4 class="h6 mb-2">Timeout</h4>
+                <div class="mb-2">
+                  <label class="form-label small" for="moderation-timeout-member">Member</label>
+                  <select class="form-select form-select-sm" id="moderation-timeout-member" name="member_id" required>
+                    <option value="">Select a member</option>
+                    {% for option in guild_member_options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small" for="moderation-timeout-minutes">Minutes</label>
+                  <select class="form-select form-select-sm" id="moderation-timeout-minutes" name="minutes">
+                    <option value="5">5 minutes</option>
+                    <option value="10">10 minutes</option>
+                    <option value="30">30 minutes</option>
+                    <option value="60">1 hour</option>
+                    <option value="360">6 hours</option>
+                    <option value="1440">24 hours</option>
+                    <option value="10080">7 days</option>
+                  </select>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small" for="moderation-timeout-reason">Reason</label>
+                  <input class="form-control form-control-sm" id="moderation-timeout-reason" type="text" name="reason" maxlength="256" placeholder="Web admin timeout request">
+                </div>
+                <button class="btn btn-outline-warning btn-sm guild-card-action" type="submit" {% if not can_manage_guild %}disabled{% endif %}>Timeout Member</button>
+              </form>
+            </div>
+            <div class="col-12 col-xl-6">
+              <form method="post" action="{{ url_for('untimeout_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Remove timeout for the selected member in {{ selected_guild_name|escape }}?');">
+                <input type="hidden" name="guild_id" value="{{ selected_guild_id }}">
+                <h4 class="h6 mb-2">Remove Timeout</h4>
+                <div class="mb-2">
+                  <label class="form-label small" for="moderation-untimeout-member">Member</label>
+                  <select class="form-select form-select-sm" id="moderation-untimeout-member" name="member_id" required>
+                    <option value="">Select a member</option>
+                    {% for option in guild_member_options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small" for="moderation-untimeout-reason">Reason</label>
+                  <input class="form-control form-control-sm" id="moderation-untimeout-reason" type="text" name="reason" maxlength="256" placeholder="Web admin untimeout request">
+                </div>
+                <button class="btn btn-outline-primary btn-sm guild-card-action" type="submit" {% if not can_manage_guild %}disabled{% endif %}>Remove Timeout</button>
+              </form>
+            </div>
+          </div>
+          {% elif not members_intent_enabled %}
+          <p class="text-secondary small mb-0">Member picker is limited because `ENABLE_MEMBERS_INTENT` is disabled. Enable it to manage the full guild roster from the web GUI.</p>
+          {% else %}
+          <p class="text-secondary small mb-0">No kickable members are currently available in this guild.</p>
+          {% endif %}
+        </div>
+      </details>
+      <details class="collapsible-card mb-3">
+        <summary>
+          <span>Visible Members</span>
+          <span class="text-secondary small">Search and browse members visible to this guild context</span>
+        </summary>
+        <div class="collapsible-card-body">
+          {% if guild_members %}
+          <div class="row g-2 align-items-end mb-2">
+            <div class="col-12 col-md-8">
+              <label class="form-label small" for="guild-member-search-{{ selected_guild_id }}">Search Members</label>
+              <input
+                class="form-control form-control-sm"
+                id="guild-member-search-{{ selected_guild_id }}"
+                type="search"
+                placeholder="Filter by display name, username, or ID"
+                data-member-search
+                data-member-search-target="guild-member-table-{{ selected_guild_id }}"
+                data-member-count-target="guild-member-count-{{ selected_guild_id }}"
+                data-member-page-target="guild-member-pagination-{{ selected_guild_id }}"
+              >
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label small" for="guild-member-page-size-{{ selected_guild_id }}">Rows Per Page</label>
+              <select
+                class="form-select form-select-sm"
+                id="guild-member-page-size-{{ selected_guild_id }}"
+                data-member-page-size
+                data-member-search-target="guild-member-table-{{ selected_guild_id }}"
+                data-member-count-target="guild-member-count-{{ selected_guild_id }}"
+                data-member-page-target="guild-member-pagination-{{ selected_guild_id }}"
+              >
+                <option value="10">10</option>
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <p class="text-secondary small mt-1 mb-0" id="guild-member-count-{{ selected_guild_id }}">Showing {{ [guild_members|length, 25]|min }} of {{ guild_members|length }} visible members.</p>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0" id="guild-member-table-{{ selected_guild_id }}">
+              <thead>
+                <tr>
+                  <th scope="col">Display Name</th>
+                  <th scope="col">Discord User</th>
+                  <th scope="col">ID</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for member in guild_members %}
+                <tr data-member-row data-member-search-text="{{ (member.name ~ ' ' ~ member.username ~ ' ' ~ member.id)|lower }}">
+                  <td>{{ member.name }}</td>
+                  <td class="text-secondary small">{{ member.username }}</td>
+                  <td class="text-secondary small">{{ member.id }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mt-3" id="guild-member-pagination-{{ selected_guild_id }}">
+            <p class="text-secondary small mb-0" data-member-page-status>Page 1</p>
+            <div class="d-flex gap-2">
+              <button class="btn btn-outline-secondary btn-sm" type="button" data-member-prev>Previous</button>
+              <button class="btn btn-outline-secondary btn-sm" type="button" data-member-next>Next</button>
+            </div>
+          </div>
+          {% elif not members_intent_enabled %}
+          <p class="text-secondary small mb-0">Member list visibility is limited because `ENABLE_MEMBERS_INTENT` is disabled.</p>
+          {% else %}
+          <p class="text-secondary small mb-0">No members are currently visible for this guild.</p>
+          {% endif %}
+        </div>
+      </details>
     {% elif page == "settings" %}
       <div class="card card-soft p-3">
         <h1 class="h5 mb-3">Runtime Settings</h1>
