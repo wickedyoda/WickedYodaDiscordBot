@@ -61,10 +61,21 @@ logging.basicConfig(
 logger = logging.getLogger("wickedyoda-helper")
 bot_channel_logger = logging.getLogger("wickedyoda-helper.channel-log")
 
+PROTECTED_CONTAINER_ENV_KEYS = {
+    "DATA_DIR",
+    "LOG_DIR",
+    "WEB_BIND_HOST",
+    "WEB_PORT",
+    "WEB_TLS_ENABLED",
+    "WEB_TLS_PORT",
+    "WEB_ENV_FILE",
+}
 
-def _load_env_file(path: Path, *, override: bool) -> None:
+
+def _load_env_file(path: Path, *, override: bool, protected_keys: set[str] | None = None) -> None:
     if not path.exists() or not path.is_file():
         return
+    protected = {str(key).strip() for key in (protected_keys or set()) if str(key).strip()}
     try:
         content = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
@@ -78,13 +89,15 @@ def _load_env_file(path: Path, *, override: bool) -> None:
         value = value.strip().strip('"').strip("'")
         if not key:
             continue
+        if override and key in protected:
+            continue
         if override or key not in os.environ:
             os.environ[key] = value
 
 
 # Load defaults first, then override with web GUI edits.
 _load_env_file(Path.cwd() / "env.env", override=False)
-_load_env_file(Path("/app/env.env"), override=True)
+_load_env_file(Path("/app/env.env"), override=True, protected_keys=PROTECTED_CONTAINER_ENV_KEYS)
 
 
 def required_env(name: str) -> str:
