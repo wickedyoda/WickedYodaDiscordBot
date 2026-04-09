@@ -2202,18 +2202,39 @@ PAGE_TEMPLATE = """
                 {% endif %}
               </div>
               {% if guild_members %}
-              <div class="mb-2">
-                <label class="form-label small" for="guild-member-search-{{ guild.id }}">Search Members</label>
-                <input
-                  class="form-control form-control-sm"
-                  id="guild-member-search-{{ guild.id }}"
-                  type="search"
-                  placeholder="Filter by display name, username, or ID"
-                  data-member-search
-                  data-member-search-target="guild-member-table-{{ guild.id }}"
-                  data-member-count-target="guild-member-count-{{ guild.id }}"
-                >
-                <p class="text-secondary small mt-2 mb-0" id="guild-member-count-{{ guild.id }}">Showing {{ guild_members|length }} of {{ guild_members|length }} visible members.</p>
+              <div class="row g-2 align-items-end mb-2">
+                <div class="col-12 col-md-8">
+                  <label class="form-label small" for="guild-member-search-{{ guild.id }}">Search Members</label>
+                  <input
+                    class="form-control form-control-sm"
+                    id="guild-member-search-{{ guild.id }}"
+                    type="search"
+                    placeholder="Filter by display name, username, or ID"
+                    data-member-search
+                    data-member-search-target="guild-member-table-{{ guild.id }}"
+                    data-member-count-target="guild-member-count-{{ guild.id }}"
+                    data-member-page-target="guild-member-pagination-{{ guild.id }}"
+                  >
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label small" for="guild-member-page-size-{{ guild.id }}">Rows Per Page</label>
+                  <select
+                    class="form-select form-select-sm"
+                    id="guild-member-page-size-{{ guild.id }}"
+                    data-member-page-size
+                    data-member-search-target="guild-member-table-{{ guild.id }}"
+                    data-member-count-target="guild-member-count-{{ guild.id }}"
+                    data-member-page-target="guild-member-pagination-{{ guild.id }}"
+                  >
+                    <option value="10">10</option>
+                    <option value="25" selected>25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+                </div>
+                <div class="col-12">
+                  <p class="text-secondary small mt-1 mb-0" id="guild-member-count-{{ guild.id }}">Showing {{ [guild_members|length, 25]|min }} of {{ guild_members|length }} visible members.</p>
+                </div>
               </div>
               <div class="table-responsive">
                 <table class="table table-sm align-middle mb-0" id="guild-member-table-{{ guild.id }}">
@@ -2234,6 +2255,13 @@ PAGE_TEMPLATE = """
                     {% endfor %}
                   </tbody>
                 </table>
+              </div>
+              <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mt-3" id="guild-member-pagination-{{ guild.id }}">
+                <p class="text-secondary small mb-0" data-member-page-status>Page 1</p>
+                <div class="d-flex gap-2">
+                  <button class="btn btn-outline-secondary btn-sm" type="button" data-member-prev>Previous</button>
+                  <button class="btn btn-outline-secondary btn-sm" type="button" data-member-next>Next</button>
+                </div>
               </div>
               {% elif not members_intent_enabled %}
               <p class="text-secondary small mb-0">Member list visibility is limited because `ENABLE_MEMBERS_INTENT` is disabled.</p>
@@ -2983,25 +3011,74 @@ PAGE_TEMPLATE = """
       document.querySelectorAll("[data-member-search]").forEach((input) => {
         const tableId = input.getAttribute("data-member-search-target");
         const countId = input.getAttribute("data-member-count-target");
+        const pageId = input.getAttribute("data-member-page-target");
         const table = tableId ? document.getElementById(tableId) : null;
         const countNode = countId ? document.getElementById(countId) : null;
+        const pageNode = pageId ? document.getElementById(pageId) : null;
+        const pageStatusNode = pageNode ? pageNode.querySelector("[data-member-page-status]") : null;
+        const prevButton = pageNode ? pageNode.querySelector("[data-member-prev]") : null;
+        const nextButton = pageNode ? pageNode.querySelector("[data-member-next]") : null;
+        const pageSizeSelect = document.querySelector(`[data-member-page-size][data-member-search-target="${tableId}"]`);
         if (!table) { return; }
         const rows = Array.from(table.querySelectorAll("[data-member-row]"));
         const total = rows.length;
+        let currentPage = 1;
         const updateRows = () => {
           const query = String(input.value || "").trim().toLowerCase();
-          let visible = 0;
+          const pageSize = Math.max(1, Number(pageSizeSelect && "value" in pageSizeSelect ? pageSizeSelect.value : 25) || 25);
+          const filteredRows = [];
           rows.forEach((row) => {
             const haystack = String(row.getAttribute("data-member-search-text") || "");
             const matches = !query || haystack.includes(query);
-            row.style.display = matches ? "" : "none";
-            if (matches) { visible += 1; }
+            if (matches) {
+              filteredRows.push(row);
+            }
+            row.style.display = "none";
+          });
+          const visible = filteredRows.length;
+          const pageCount = Math.max(1, Math.ceil(visible / pageSize));
+          currentPage = Math.min(currentPage, pageCount);
+          const start = (currentPage - 1) * pageSize;
+          const end = start + pageSize;
+          filteredRows.forEach((row, index) => {
+            row.style.display = index >= start && index < end ? "" : "none";
           });
           if (countNode) {
-            countNode.textContent = `Showing ${visible} of ${total} visible members.`;
+            const shown = filteredRows.slice(start, end).length;
+            countNode.textContent = `Showing ${shown} of ${visible} filtered members (${total} total).`;
+          }
+          if (pageStatusNode) {
+            pageStatusNode.textContent = `Page ${currentPage} of ${pageCount}`;
+          }
+          if (prevButton) {
+            prevButton.disabled = currentPage <= 1 || visible === 0;
+          }
+          if (nextButton) {
+            nextButton.disabled = currentPage >= pageCount || visible === 0;
           }
         };
-        input.addEventListener("input", updateRows);
+        input.addEventListener("input", () => {
+          currentPage = 1;
+          updateRows();
+        });
+        if (pageSizeSelect) {
+          pageSizeSelect.addEventListener("change", () => {
+            currentPage = 1;
+            updateRows();
+          });
+        }
+        if (prevButton) {
+          prevButton.addEventListener("click", () => {
+            currentPage = Math.max(1, currentPage - 1);
+            updateRows();
+          });
+        }
+        if (nextButton) {
+          nextButton.addEventListener("click", () => {
+            currentPage += 1;
+            updateRows();
+          });
+        }
         updateRows();
       });
     })();
