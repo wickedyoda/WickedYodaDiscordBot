@@ -2724,6 +2724,7 @@ def create_app(
                 }
             )
         member_options: list[dict] = []
+        visible_members: list[dict] = []
         members_intent_enabled = False
         if isinstance(catalog_payload, dict) and catalog_payload.get("ok"):
             members_intent_enabled = bool(catalog_payload.get("members_intent_enabled"))
@@ -2737,11 +2738,19 @@ def create_app(
                 if member_username and member_username != member_name:
                     label = f"{member_name} ({member_username})"
                 member_options.append({"value": member_id_value, "label": label})
+                visible_members.append(
+                    {
+                        "id": member_id_value,
+                        "name": member_name,
+                        "username": member_username or member_name,
+                    }
+                )
         return _render_page(
             "guilds",
             "Discord Servers",
             guild_cards=guild_cards,
             guild_member_options=member_options,
+            guild_members=visible_members,
             members_intent_enabled=members_intent_enabled,
         )
 

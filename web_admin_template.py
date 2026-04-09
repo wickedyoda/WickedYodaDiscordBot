@@ -2194,6 +2194,40 @@ PAGE_TEMPLATE = """
               <p class="text-secondary small mb-0">No kickable members are currently available in this guild.</p>
               {% endif %}
             </div>
+            <div class="border-top pt-3 mt-3">
+              <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                <h3 class="h6 mb-0">Visible Members</h3>
+                {% if guild_members %}
+                <span class="badge text-bg-secondary">{{ guild_members|length }}</span>
+                {% endif %}
+              </div>
+              {% if guild_members %}
+              <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th scope="col">Display Name</th>
+                      <th scope="col">Discord User</th>
+                      <th scope="col">ID</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for member in guild_members %}
+                    <tr>
+                      <td>{{ member.name }}</td>
+                      <td class="text-secondary small">{{ member.username }}</td>
+                      <td class="text-secondary small">{{ member.id }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% elif not members_intent_enabled %}
+              <p class="text-secondary small mb-0">Member list visibility is limited because `ENABLE_MEMBERS_INTENT` is disabled.</p>
+              {% else %}
+              <p class="text-secondary small mb-0">No members are currently visible for this guild.</p>
+              {% endif %}
+            </div>
             {% endif %}
           </div>
         </div>
