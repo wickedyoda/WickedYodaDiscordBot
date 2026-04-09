@@ -68,7 +68,7 @@ Set these in `env.env`:
 - `WEB_ENFORCE_SAME_ORIGIN_POSTS` - block cross-origin POST requests (`true`/`false`)
 - `WEB_RESTART_ENABLED` - allow admin-triggered container restart from web GUI (`true`/`false`)
 - `DATA_DIR` - when using the shipped Docker Compose example, host-side bind path for persistent bot data (example: `/root/docker/wickedyodabot`)
-- `LOG_DIR` - when using the shipped Docker Compose example, host-side bind path for persistent bot logs (example: `/root/docker/wickedyodabot/log`)
+- `LOG_DIR` - when using the shipped Docker Compose example, host-side bind path for persistent bot logs (example: `/root/docker/wickedyodabot/logs`)
 - `WEB_ENV_FILE` - optional path to env file used by web GUI settings editor (default: `./env.env`)
 - `WEB_GITHUB_WIKI_URL` - optional external wiki URL button in the web GUI Wiki page
 
@@ -153,6 +153,7 @@ SQLite storage is internal to the container at `/app/data/mod_actions.db`.
 
 - HTTP URL: `http://localhost:8080`
 - HTTPS URL: `https://localhost:8081`
+- Health check (ready): `http://localhost:8080/health` (returns `200` only when Discord bot is ready)
 - Login: `WEB_ADMIN_DEFAULT_USERNAME` / `WEB_ADMIN_DEFAULT_PASSWORD`
 - If `WEB_TLS_ENABLED=true` and cert/key files are not set, Flask runs with an adhoc self-signed certificate (requires `cryptography`, included in this image).
 - Use the guild dropdown in the top nav to switch the server you are managing.
@@ -265,8 +266,8 @@ docker compose --env-file env.env up -d
 ```
 
 The shipped Compose example bind-mounts `${DATA_DIR:-/root/docker/wickedyodabot}` on the host to `/app/data` inside the container.
-It also bind-mounts `${LOG_DIR:-/root/docker/wickedyodabot/log}` on the host to `/app/log` inside the container.
-`docker-compose.yml` overrides the bot's in-container `DATA_DIR` to `/app/data` and `LOG_DIR` to `/app/log`.
+It also bind-mounts `${LOG_DIR:-/root/docker/wickedyodabot/log}` on the host to `/logs` inside the container.
+`docker-compose.yml` overrides the bot's in-container `DATA_DIR` to `/app/data` and `LOG_DIR` to `/logs`.
 
 ## Docker Image Publish (GitHub Packages / GHCR)
 

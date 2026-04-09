@@ -51,6 +51,7 @@ from bot_constants import (
     YOUTUBE_POST_ID_PATTERN,
     YOUTUBE_TEXT_PATTERN,
 )
+from moderation_filter import apply_moderation_filter
 from web_admin import start_web_admin
 
 logging.basicConfig(
@@ -60,10 +61,21 @@ logging.basicConfig(
 logger = logging.getLogger("wickedyoda-helper")
 bot_channel_logger = logging.getLogger("wickedyoda-helper.channel-log")
 
+PROTECTED_CONTAINER_ENV_KEYS = {
+    "DATA_DIR",
+    "LOG_DIR",
+    "WEB_BIND_HOST",
+    "WEB_PORT",
+    "WEB_TLS_ENABLED",
+    "WEB_TLS_PORT",
+    "WEB_ENV_FILE",
+}
 
-def _load_env_file(path: Path, *, override: bool) -> None:
+
+def _load_env_file(path: Path, *, override: bool, protected_keys: set[str] | None = None) -> None:
     if not path.exists() or not path.is_file():
         return
+    protected = {str(key).strip() for key in (protected_keys or set()) if str(key).strip()}
     try:
         content = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
@@ -77,13 +89,15 @@ def _load_env_file(path: Path, *, override: bool) -> None:
         value = value.strip().strip('"').strip("'")
         if not key:
             continue
+        if override and key in protected:
+            continue
         if override or key not in os.environ:
             os.environ[key] = value
 
 
 # Load defaults first, then override with web GUI edits.
 _load_env_file(Path.cwd() / "env.env", override=False)
-_load_env_file(Path("/app/env.env"), override=True)
+_load_env_file(Path("/app/env.env"), override=True, protected_keys=PROTECTED_CONTAINER_ENV_KEYS)
 
 
 def required_env(name: str) -> str:
@@ -2460,6 +2474,12 @@ class ActionStore:
                     spicy_prompts_channel_id INTEGER,
                     uptime_alert_channel_id INTEGER,
                     color_role_ids_json TEXT NOT NULL DEFAULT "[]",
+                    moderation_enabled INTEGER NOT NULL DEFAULT 0,
+                    moderation_words_json TEXT NOT NULL DEFAULT "[]",
+                    moderation_warning_window_hours INTEGER NOT NULL DEFAULT 72,
+                    moderation_warning_threshold INTEGER NOT NULL DEFAULT 3,
+                    moderation_action TEXT NOT NULL DEFAULT "timeout",
+                    moderation_timeout_minutes INTEGER NOT NULL DEFAULT 10,
                     updated_at TEXT NOT NULL
                 )
                 """
@@ -2470,10 +2490,35 @@ class ActionStore:
                 "spicy_prompts_channel_id": "ALTER TABLE guild_settings ADD COLUMN spicy_prompts_channel_id INTEGER",
                 "uptime_alert_channel_id": "ALTER TABLE guild_settings ADD COLUMN uptime_alert_channel_id INTEGER",
                 "color_role_ids_json": "ALTER TABLE guild_settings ADD COLUMN color_role_ids_json TEXT NOT NULL DEFAULT '[]'",
+                "moderation_enabled": "ALTER TABLE guild_settings ADD COLUMN moderation_enabled INTEGER NOT NULL DEFAULT 0",
+                "moderation_words_json": "ALTER TABLE guild_settings ADD COLUMN moderation_words_json TEXT NOT NULL DEFAULT '[]'",
+                "moderation_warning_window_hours": "ALTER TABLE guild_settings ADD COLUMN moderation_warning_window_hours INTEGER NOT NULL DEFAULT 72",
+                "moderation_warning_threshold": "ALTER TABLE guild_settings ADD COLUMN moderation_warning_threshold INTEGER NOT NULL DEFAULT 3",
+                "moderation_action": "ALTER TABLE guild_settings ADD COLUMN moderation_action TEXT NOT NULL DEFAULT 'timeout'",
+                "moderation_timeout_minutes": "ALTER TABLE guild_settings ADD COLUMN moderation_timeout_minutes INTEGER NOT NULL DEFAULT 10",
             }
             for column, statement in guild_settings_migrations.items():
                 if column not in guild_settings_columns:
                     conn.execute(statement)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS moderation_warnings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    message_id INTEGER,
+                    channel_id INTEGER,
+                    matched_word TEXT,
+                    warned_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_moderation_warnings_recent
+                ON moderation_warnings (guild_id, user_id, warned_at)
+                """
+            )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS uptime_monitors (
@@ -2629,9 +2674,20 @@ class ActionStore:
                         conn.execute(
                             """
                             INSERT INTO guild_settings (
-                                guild_id, bot_log_channel_id, spicy_prompts_enabled, spicy_prompts_channel_id, color_role_ids_json, updated_at
+                                guild_id,
+                                bot_log_channel_id,
+                                spicy_prompts_enabled,
+                                spicy_prompts_channel_id,
+                                color_role_ids_json,
+                                moderation_enabled,
+                                moderation_words_json,
+                                moderation_warning_window_hours,
+                                moderation_warning_threshold,
+                                moderation_action,
+                                moderation_timeout_minutes,
+                                updated_at
                             )
-                            VALUES (?, ?, 0, NULL, ?, ?)
+                            VALUES (?, ?, 0, NULL, ?, 0, "[]", 72, 3, "timeout", 10, ?)
                             """,
                             (guild_id, BOT_LOG_CHANNEL, "[]", now),
                         )
@@ -3245,13 +3301,24 @@ class ActionStore:
                 conn.commit()
         return normalized
 
-    def get_guild_settings(self, guild_id: int) -> dict[str, int | None]:
+    def get_guild_settings(self, guild_id: int) -> dict[str, int | None | str | list[str]]:
         with self._lock:
             with self._connect() as conn:
                 conn.row_factory = sqlite3.Row
                 row = conn.execute(
                     """
-                    SELECT guild_id, bot_log_channel_id, spicy_prompts_enabled, spicy_prompts_channel_id, uptime_alert_channel_id, color_role_ids_json
+                    SELECT guild_id,
+                           bot_log_channel_id,
+                           spicy_prompts_enabled,
+                           spicy_prompts_channel_id,
+                           uptime_alert_channel_id,
+                           color_role_ids_json,
+                           moderation_enabled,
+                           moderation_words_json,
+                           moderation_warning_window_hours,
+                           moderation_warning_threshold,
+                           moderation_action,
+                           moderation_timeout_minutes
                     FROM guild_settings
                     WHERE guild_id = ?
                     """,
@@ -3265,10 +3332,19 @@ class ActionStore:
                 "spicy_prompts_channel_id": None,
                 "uptime_alert_channel_id": None,
                 "color_role_ids": [],
+                "moderation_enabled": 0,
+                "moderation_words": [],
+                "moderation_warning_window_hours": 72,
+                "moderation_warning_threshold": 3,
+                "moderation_action": "timeout",
+                "moderation_timeout_minutes": 10,
             }
         color_role_ids_raw = "[]"
+        moderation_words_raw = "[]"
         if "color_role_ids_json" in row.keys():
             color_role_ids_raw = row["color_role_ids_json"] or "[]"
+        if "moderation_words_json" in row.keys():
+            moderation_words_raw = row["moderation_words_json"] or "[]"
         return {
             "guild_id": int(row["guild_id"]),
             "bot_log_channel_id": int(row["bot_log_channel_id"]) if row["bot_log_channel_id"] else None,
@@ -3276,6 +3352,12 @@ class ActionStore:
             "spicy_prompts_channel_id": int(row["spicy_prompts_channel_id"]) if row["spicy_prompts_channel_id"] else None,
             "uptime_alert_channel_id": int(row["uptime_alert_channel_id"]) if row["uptime_alert_channel_id"] else None,
             "color_role_ids": json.loads(str(color_role_ids_raw)),
+            "moderation_enabled": int(row["moderation_enabled"] or 0),
+            "moderation_words": json.loads(str(moderation_words_raw)),
+            "moderation_warning_window_hours": int(row["moderation_warning_window_hours"] or 72),
+            "moderation_warning_threshold": int(row["moderation_warning_threshold"] or 3),
+            "moderation_action": str(row["moderation_action"] or "timeout"),
+            "moderation_timeout_minutes": int(row["moderation_timeout_minutes"] or 10),
         }
 
     def save_guild_settings(
@@ -3287,7 +3369,13 @@ class ActionStore:
         spicy_prompts_channel_id: int | None = None,
         uptime_alert_channel_id: int | None = None,
         color_role_ids: list[int] | None = None,
-    ) -> dict[str, int | None]:
+        moderation_enabled: bool | None = None,
+        moderation_words: list[str] | None = None,
+        moderation_warning_window_hours: int | None = None,
+        moderation_warning_threshold: int | None = None,
+        moderation_action: str | None = None,
+        moderation_timeout_minutes: int | None = None,
+    ) -> dict[str, int | None | str | list[str]]:
         now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
         current = self.get_guild_settings(guild_id)
         if spicy_prompts_enabled is None:
@@ -3298,20 +3386,50 @@ class ActionStore:
             uptime_alert_channel_id = int(current.get("uptime_alert_channel_id", 0) or 0)
         if color_role_ids is None:
             color_role_ids = [int(value) for value in (current.get("color_role_ids") or []) if int(value) > 0]
+        if moderation_enabled is None:
+            moderation_enabled = bool(int(current.get("moderation_enabled", 0) or 0))
+        if moderation_words is None:
+            moderation_words = [str(value) for value in (current.get("moderation_words") or []) if str(value).strip()]
+        if moderation_warning_window_hours is None:
+            moderation_warning_window_hours = int(current.get("moderation_warning_window_hours", 72) or 72)
+        if moderation_warning_threshold is None:
+            moderation_warning_threshold = int(current.get("moderation_warning_threshold", 3) or 3)
+        if moderation_action is None:
+            moderation_action = str(current.get("moderation_action") or "timeout")
+        if moderation_timeout_minutes is None:
+            moderation_timeout_minutes = int(current.get("moderation_timeout_minutes", 10) or 10)
         with self._lock:
             with self._connect() as conn:
                 conn.execute(
                     """
                     INSERT INTO guild_settings (
-                        guild_id, bot_log_channel_id, spicy_prompts_enabled, spicy_prompts_channel_id, uptime_alert_channel_id, color_role_ids_json, updated_at
+                        guild_id,
+                        bot_log_channel_id,
+                        spicy_prompts_enabled,
+                        spicy_prompts_channel_id,
+                        uptime_alert_channel_id,
+                        color_role_ids_json,
+                        moderation_enabled,
+                        moderation_words_json,
+                        moderation_warning_window_hours,
+                        moderation_warning_threshold,
+                        moderation_action,
+                        moderation_timeout_minutes,
+                        updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(guild_id) DO UPDATE SET
                         bot_log_channel_id = excluded.bot_log_channel_id,
                         spicy_prompts_enabled = excluded.spicy_prompts_enabled,
                         spicy_prompts_channel_id = excluded.spicy_prompts_channel_id,
                         uptime_alert_channel_id = excluded.uptime_alert_channel_id,
                         color_role_ids_json = excluded.color_role_ids_json,
+                        moderation_enabled = excluded.moderation_enabled,
+                        moderation_words_json = excluded.moderation_words_json,
+                        moderation_warning_window_hours = excluded.moderation_warning_window_hours,
+                        moderation_warning_threshold = excluded.moderation_warning_threshold,
+                        moderation_action = excluded.moderation_action,
+                        moderation_timeout_minutes = excluded.moderation_timeout_minutes,
                         updated_at = excluded.updated_at
                     """,
                     (
@@ -3321,11 +3439,66 @@ class ActionStore:
                         spicy_prompts_channel_id,
                         uptime_alert_channel_id,
                         json.dumps(sorted({int(value) for value in (color_role_ids or []) if int(value) > 0})),
+                        1 if moderation_enabled else 0,
+                        json.dumps(sorted({str(value).strip().lower() for value in (moderation_words or []) if str(value).strip()})),
+                        int(moderation_warning_window_hours),
+                        int(moderation_warning_threshold),
+                        str(moderation_action or "timeout"),
+                        int(moderation_timeout_minutes),
                         now,
                     ),
                 )
                 conn.commit()
         return self.get_guild_settings(guild_id)
+
+    def record_moderation_warning(
+        self,
+        guild_id: int,
+        user_id: int,
+        *,
+        message_id: int | None = None,
+        channel_id: int | None = None,
+        matched_word: str | None = None,
+    ) -> None:
+        warned_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO moderation_warnings (
+                        guild_id, user_id, message_id, channel_id, matched_word, warned_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(guild_id),
+                        int(user_id),
+                        int(message_id) if message_id else None,
+                        int(channel_id) if channel_id else None,
+                        str(matched_word or ""),
+                        warned_at,
+                    ),
+                )
+                conn.commit()
+
+    def count_recent_moderation_warnings(
+        self,
+        guild_id: int,
+        user_id: int,
+        *,
+        since_dt: datetime,
+    ) -> int:
+        with self._lock:
+            with self._connect() as conn:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM moderation_warnings
+                    WHERE guild_id = ? AND user_id = ? AND warned_at >= ?
+                    """,
+                    (int(guild_id), int(user_id), since_dt.strftime("%Y-%m-%d %H:%M:%S")),
+                ).fetchone()
+        return int(row[0] or 0)
 
     def record_spicy_prompt_usage(self, guild_id: int, pack_id: str, prompt_id: str) -> None:
         now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
@@ -4709,12 +4882,24 @@ def run_web_save_guild_settings(payload: dict, _actor_email: str, guild_id: int)
     raw_spicy_channel_id = str(payload.get("spicy_prompts_channel_id", "")).strip()
     raw_spicy_enabled = str(payload.get("spicy_prompts_enabled", "")).strip().lower()
     raw_uptime_channel_id = str(payload.get("uptime_alert_channel_id", "")).strip()
+    raw_moderation_enabled = str(payload.get("moderation_enabled", "")).strip().lower()
+    raw_moderation_words = payload.get("moderation_words", "")
+    raw_warning_window = str(payload.get("moderation_warning_window_hours", "")).strip()
+    raw_warning_threshold = str(payload.get("moderation_warning_threshold", "")).strip()
+    raw_moderation_action = str(payload.get("moderation_action", "")).strip().lower()
+    raw_timeout_minutes = str(payload.get("moderation_timeout_minutes", "")).strip()
     color_role_names = payload.get("color_role_names", [])
     color_role_ids_payload = payload.get("color_role_ids", [])
     bot_log_channel_id: int | None
     spicy_prompts_channel_id: int | None
     spicy_prompts_enabled: bool | None
     uptime_alert_channel_id: int | None
+    moderation_enabled: bool | None
+    moderation_words: list[str] | None
+    moderation_warning_window_hours: int | None
+    moderation_warning_threshold: int | None
+    moderation_action: str | None
+    moderation_timeout_minutes: int | None
     if not raw_channel_id:
         bot_log_channel_id = None
     elif raw_channel_id.isdigit():
@@ -4738,6 +4923,41 @@ def run_web_save_guild_settings(payload: dict, _actor_email: str, guild_id: int)
         uptime_alert_channel_id = int(raw_uptime_channel_id)
     else:
         return {"ok": False, "error": "Uptime alert channel ID must be numeric."}
+
+    moderation_enabled = raw_moderation_enabled in {"1", "true", "yes", "on"} if raw_moderation_enabled else None
+    moderation_words = None
+    if isinstance(raw_moderation_words, list):
+        moderation_words = [str(value).strip() for value in raw_moderation_words if str(value).strip()]
+    elif isinstance(raw_moderation_words, str):
+        moderation_words = [line.strip() for line in raw_moderation_words.replace(",", "\n").splitlines() if line.strip()]
+
+    if raw_warning_window:
+        if not raw_warning_window.isdigit():
+            return {"ok": False, "error": "Moderation warning window must be numeric hours."}
+        moderation_warning_window_hours = int(raw_warning_window)
+    else:
+        moderation_warning_window_hours = None
+
+    if raw_warning_threshold:
+        if not raw_warning_threshold.isdigit():
+            return {"ok": False, "error": "Moderation warning threshold must be numeric."}
+        moderation_warning_threshold = int(raw_warning_threshold)
+    else:
+        moderation_warning_threshold = None
+
+    if raw_moderation_action:
+        if raw_moderation_action not in {"timeout", "warn_only"}:
+            return {"ok": False, "error": "Moderation action must be timeout or warn_only."}
+        moderation_action = raw_moderation_action
+    else:
+        moderation_action = None
+
+    if raw_timeout_minutes:
+        if not raw_timeout_minutes.isdigit():
+            return {"ok": False, "error": "Moderation timeout minutes must be numeric."}
+        moderation_timeout_minutes = int(raw_timeout_minutes)
+    else:
+        moderation_timeout_minutes = None
 
     parsed_role_ids: list[int] = []
     if isinstance(color_role_ids_payload, list):
@@ -4767,6 +4987,12 @@ def run_web_save_guild_settings(payload: dict, _actor_email: str, guild_id: int)
             spicy_prompts_channel_id=spicy_prompts_channel_id,
             uptime_alert_channel_id=uptime_alert_channel_id,
             color_role_ids=merged_ids,
+            moderation_enabled=moderation_enabled,
+            moderation_words=moderation_words,
+            moderation_warning_window_hours=moderation_warning_window_hours,
+            moderation_warning_threshold=moderation_warning_threshold,
+            moderation_action=moderation_action,
+            moderation_timeout_minutes=moderation_timeout_minutes,
         )
     except Exception as exc:
         logger.exception("Failed to save guild settings for %s: %s", guild_id, exc)
@@ -5128,6 +5354,7 @@ class ModerationBot(commands.Bot):
         managed = self.get_managed_guilds()
         return {
             "bot_name": str(self.user) if self.user else "Starting...",
+            "bot_ready": bool(self.is_ready()),
             "guild_id": GUILD_ID,
             "guild_count": len(managed),
             "latency_ms": latency_ms,
@@ -5209,6 +5436,16 @@ class ModerationBot(commands.Bot):
                     getattr(message, "id", "unknown"),
                     message.guild.id,
                 )
+        if message.guild and message.guild.id in managed_ids and isinstance(message.author, discord.Member):
+            await apply_moderation_filter(
+                message,
+                action_store=ACTION_STORE,
+                log_action=log_action,
+                record_action_safe=record_action_safe,
+                truncate_log_text=truncate_log_text,
+                logger=logger,
+                bot_client=self,
+            )
         if isinstance(message.author, discord.Member) and message.guild and message.guild.id in managed_ids:
             content = (message.content or "").strip()
             if content.startswith("!"):
