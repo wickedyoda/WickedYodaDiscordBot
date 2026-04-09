@@ -18,6 +18,6 @@ RUN mkdir -p /app/data /logs \
     && chown -R botuser:botuser /app /logs \
     && chmod +x /app/entrypoint.sh
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD python -c "import os,sys,urllib.request; enabled=os.getenv('WEB_ENABLED','true').lower() in {'1','true','yes','on'}; url=f'http://127.0.0.1:{os.getenv(\"WEB_PORT\",\"8080\")}/healthz'; status=urllib.request.urlopen(url, timeout=3).status if enabled else 200; sys.exit(0 if status==200 else 1)"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD python -c "import os,sys,urllib.request; enabled=os.getenv('WEB_ENABLED','true').lower() in {'1','true','yes','on'}; port=os.getenv('WEB_PORT','8080'); base=f'http://127.0.0.1:{port}';\n\n\nstatus=200\nif enabled:\n    try:\n        status=urllib.request.urlopen(f'{base}/health', timeout=3).status\n        if status!=200:\n            status=urllib.request.urlopen(f'{base}/healthz', timeout=3).status\n    except Exception:\n        status=1\nsys.exit(0 if status==200 else 1)"
 
 ENTRYPOINT ["/app/entrypoint.sh"]
