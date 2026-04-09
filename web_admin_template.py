@@ -2084,25 +2084,110 @@ PAGE_TEMPLATE = """
             {% endif %}
             {% if can_manage_guild and guild.selected %}
             <div class="border-top pt-3 mt-3">
-              <h3 class="h6 mb-2">Kick Member</h3>
+              <h3 class="h6 mb-2">Moderate Members</h3>
               {% if guild_member_options %}
-              <form method="post" action="{{ url_for('kick_guild_member_route') }}" onsubmit="return confirm('Kick the selected member from {{ guild.name|escape }}?');">
-                <input type="hidden" name="guild_id" value="{{ guild.id }}">
-                <div class="mb-2">
-                  <label class="form-label small" for="guild-kick-member-{{ guild.id }}">Member</label>
-                  <select class="form-select form-select-sm" id="guild-kick-member-{{ guild.id }}" name="member_id" required>
-                    <option value="">Select a member</option>
-                    {% for option in guild_member_options %}
-                    <option value="{{ option.value }}">{{ option.label }}</option>
-                    {% endfor %}
-                  </select>
+              <div class="row g-3">
+                <div class="col-12 col-xl-6">
+                  <form method="post" action="{{ url_for('kick_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Kick the selected member from {{ guild.name|escape }}?');">
+                    <input type="hidden" name="guild_id" value="{{ guild.id }}">
+                    <h4 class="h6 mb-2">Kick</h4>
+                    <div class="mb-2">
+                      <label class="form-label small" for="guild-kick-member-{{ guild.id }}">Member</label>
+                      <select class="form-select form-select-sm" id="guild-kick-member-{{ guild.id }}" name="member_id" required>
+                        <option value="">Select a member</option>
+                        {% for option in guild_member_options %}
+                        <option value="{{ option.value }}">{{ option.label }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="mb-2">
+                      <label class="form-label small" for="guild-kick-reason-{{ guild.id }}">Reason</label>
+                      <input class="form-control form-control-sm" id="guild-kick-reason-{{ guild.id }}" type="text" name="reason" maxlength="256" placeholder="Web admin kick request">
+                    </div>
+                    <button class="btn btn-outline-danger btn-sm guild-card-action" type="submit">Kick Member</button>
+                  </form>
                 </div>
-                <div class="mb-2">
-                  <label class="form-label small" for="guild-kick-reason-{{ guild.id }}">Reason</label>
-                  <input class="form-control form-control-sm" id="guild-kick-reason-{{ guild.id }}" type="text" name="reason" maxlength="256" placeholder="Web admin kick request">
+                <div class="col-12 col-xl-6">
+                  <form method="post" action="{{ url_for('ban_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Ban the selected member from {{ guild.name|escape }}?');">
+                    <input type="hidden" name="guild_id" value="{{ guild.id }}">
+                    <h4 class="h6 mb-2">Ban</h4>
+                    <div class="mb-2">
+                      <label class="form-label small" for="guild-ban-member-{{ guild.id }}">Member</label>
+                      <select class="form-select form-select-sm" id="guild-ban-member-{{ guild.id }}" name="member_id" required>
+                        <option value="">Select a member</option>
+                        {% for option in guild_member_options %}
+                        <option value="{{ option.value }}">{{ option.label }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="mb-2">
+                      <label class="form-label small" for="guild-ban-delete-days-{{ guild.id }}">Delete Message History</label>
+                      <select class="form-select form-select-sm" id="guild-ban-delete-days-{{ guild.id }}" name="delete_days">
+                        {% for day in range(0, 8) %}
+                        <option value="{{ day }}">{{ day }} day{% if day != 1 %}s{% endif %}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="mb-2">
+                      <label class="form-label small" for="guild-ban-reason-{{ guild.id }}">Reason</label>
+                      <input class="form-control form-control-sm" id="guild-ban-reason-{{ guild.id }}" type="text" name="reason" maxlength="256" placeholder="Web admin ban request">
+                    </div>
+                    <button class="btn btn-outline-danger btn-sm guild-card-action" type="submit">Ban Member</button>
+                  </form>
                 </div>
-                <button class="btn btn-outline-danger btn-sm guild-card-action" type="submit">Kick Member</button>
-              </form>
+                <div class="col-12 col-xl-6">
+                  <form method="post" action="{{ url_for('timeout_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Timeout the selected member in {{ guild.name|escape }}?');">
+                    <input type="hidden" name="guild_id" value="{{ guild.id }}">
+                    <h4 class="h6 mb-2">Timeout</h4>
+                    <div class="mb-2">
+                      <label class="form-label small" for="guild-timeout-member-{{ guild.id }}">Member</label>
+                      <select class="form-select form-select-sm" id="guild-timeout-member-{{ guild.id }}" name="member_id" required>
+                        <option value="">Select a member</option>
+                        {% for option in guild_member_options %}
+                        <option value="{{ option.value }}">{{ option.label }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="mb-2">
+                      <label class="form-label small" for="guild-timeout-minutes-{{ guild.id }}">Minutes</label>
+                      <select class="form-select form-select-sm" id="guild-timeout-minutes-{{ guild.id }}" name="minutes">
+                        <option value="5">5 minutes</option>
+                        <option value="10">10 minutes</option>
+                        <option value="30">30 minutes</option>
+                        <option value="60">1 hour</option>
+                        <option value="360">6 hours</option>
+                        <option value="1440">24 hours</option>
+                        <option value="10080">7 days</option>
+                      </select>
+                    </div>
+                    <div class="mb-2">
+                      <label class="form-label small" for="guild-timeout-reason-{{ guild.id }}">Reason</label>
+                      <input class="form-control form-control-sm" id="guild-timeout-reason-{{ guild.id }}" type="text" name="reason" maxlength="256" placeholder="Web admin timeout request">
+                    </div>
+                    <button class="btn btn-outline-warning btn-sm guild-card-action" type="submit">Timeout Member</button>
+                  </form>
+                </div>
+                <div class="col-12 col-xl-6">
+                  <form method="post" action="{{ url_for('untimeout_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Remove timeout for the selected member in {{ guild.name|escape }}?');">
+                    <input type="hidden" name="guild_id" value="{{ guild.id }}">
+                    <h4 class="h6 mb-2">Remove Timeout</h4>
+                    <div class="mb-2">
+                      <label class="form-label small" for="guild-untimeout-member-{{ guild.id }}">Member</label>
+                      <select class="form-select form-select-sm" id="guild-untimeout-member-{{ guild.id }}" name="member_id" required>
+                        <option value="">Select a member</option>
+                        {% for option in guild_member_options %}
+                        <option value="{{ option.value }}">{{ option.label }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="mb-2">
+                      <label class="form-label small" for="guild-untimeout-reason-{{ guild.id }}">Reason</label>
+                      <input class="form-control form-control-sm" id="guild-untimeout-reason-{{ guild.id }}" type="text" name="reason" maxlength="256" placeholder="Web admin untimeout request">
+                    </div>
+                    <button class="btn btn-outline-primary btn-sm guild-card-action" type="submit">Remove Timeout</button>
+                  </form>
+                </div>
+              </div>
               {% elif not members_intent_enabled %}
               <p class="text-secondary small mb-0">Member picker is limited because `ENABLE_MEMBERS_INTENT` is disabled. Enable it to manage the full guild roster from the web GUI.</p>
               {% else %}
