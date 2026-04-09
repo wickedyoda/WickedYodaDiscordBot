@@ -1730,6 +1730,7 @@ def create_app(
     pick_random_user: Callable[[int, int | None], dict] | Callable[[int], dict] | None = None,
     get_spicy_prompts_status: Callable[[], dict] | None = None,
     refresh_spicy_prompts: Callable[[str], dict] | None = None,
+    kick_member: Callable[[str, int, int, str], dict] | None = None,
     leave_guild: Callable[[str, int], dict] | None = None,
     request_restart: Callable[[str], dict] | None = None,
     resolve_youtube_subscription: Callable[[str], dict] | None = None,
@@ -1967,6 +1968,14 @@ def create_app(
             return get_discord_catalog()  # type: ignore[misc]
         except TypeError:
             return {}
+
+    def _call_kick_member(actor: str, guild_id: int, member_id: int, reason: str) -> dict:
+        if not callable(kick_member):
+            return {"ok": False, "error": "Kick member callback not configured."}
+        try:
+            return kick_member(actor, guild_id, member_id, reason)
+        except Exception as exc:
+            return {"ok": False, "error": f"Kick member callback failed: {exc}"}
 
     def _call_get_command_permissions(guild_id: int | None) -> dict:
         if not callable(get_command_permissions):
@@ -2676,6 +2685,7 @@ def create_app(
     @login_required
     def guilds_page():
         selected_guild_id, guild_options, _ = _selected_guild_context()
+        catalog_payload = _call_get_discord_catalog(selected_guild_id)
         guild_cards = []
         for guild in guild_options:
             guild_cards.append(
@@ -2686,11 +2696,53 @@ def create_app(
                     "member_count": guild.get("member_count"),
                 }
             )
+        member_options: list[dict] = []
+        members_intent_enabled = False
+        if isinstance(catalog_payload, dict) and catalog_payload.get("ok"):
+            members_intent_enabled = bool(catalog_payload.get("members_intent_enabled"))
+            for member in catalog_payload.get("members", []) or []:
+                member_id_value = str(member.get("id") or "").strip()
+                member_name = str(member.get("name") or "").strip()
+                member_username = str(member.get("username") or "").strip()
+                if not member_id_value or not member_name:
+                    continue
+                label = member_name
+                if member_username and member_username != member_name:
+                    label = f"{member_name} ({member_username})"
+                member_options.append({"value": member_id_value, "label": label})
         return _render_page(
             "guilds",
             "Discord Servers",
             guild_cards=guild_cards,
+            guild_member_options=member_options,
+            members_intent_enabled=members_intent_enabled,
         )
+
+    @app.post("/admin/guilds/kick")
+    @login_required
+    def kick_guild_member_route():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("guilds_page")
+        raw_guild_id = request.form.get("guild_id", "").strip()
+        raw_member_id = request.form.get("member_id", "").strip()
+        reason = request.form.get("reason", "").strip() or "Web admin kick request"
+        if not raw_guild_id.isdigit() or not raw_member_id.isdigit():
+            flash("Select a valid guild and member.", "danger")
+            return redirect(url_for("guilds_page"))
+        result = _call_kick_member(
+            str(session.get("user", "")),
+            int(raw_guild_id),
+            int(raw_member_id),
+            reason,
+        )
+        if isinstance(result, dict) and result.get("ok"):
+            flash(str(result.get("message", "Member kicked.")), "success")
+        else:
+            flash(
+                str(result.get("error", "Failed to kick member.")) if isinstance(result, dict) else "Failed to kick member.",
+                "danger",
+            )
+        return redirect(url_for("guilds_page", guild_id=raw_guild_id))
 
     @app.post("/admin/guilds/leave")
     @admin_required
@@ -4331,6 +4383,7 @@ def start_web_admin(
     pick_random_user: Callable[[int, int | None], dict] | Callable[[int], dict] | None = None,
     get_spicy_prompts_status: Callable[[], dict] | None = None,
     refresh_spicy_prompts: Callable[[str], dict] | None = None,
+    kick_member: Callable[[str, int, int, str], dict] | None = None,
     leave_guild: Callable[[str, int], dict] | None = None,
     request_restart: Callable[[str], dict] | None = None,
     resolve_youtube_subscription: Callable[[str], dict] | None = None,
@@ -4362,6 +4415,7 @@ def start_web_admin(
         pick_random_user=pick_random_user,
         get_spicy_prompts_status=get_spicy_prompts_status,
         refresh_spicy_prompts=refresh_spicy_prompts,
+        kick_member=kick_member,
         leave_guild=leave_guild,
         request_restart=request_restart,
         resolve_youtube_subscription=resolve_youtube_subscription,

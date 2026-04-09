@@ -2082,6 +2082,34 @@ PAGE_TEMPLATE = """
               <button class="btn btn-outline-danger btn-sm guild-card-action" type="submit">Leave Guild</button>
             </form>
             {% endif %}
+            {% if can_manage_guild and guild.selected %}
+            <div class="border-top pt-3 mt-3">
+              <h3 class="h6 mb-2">Kick Member</h3>
+              {% if guild_member_options %}
+              <form method="post" action="{{ url_for('kick_guild_member_route') }}" onsubmit="return confirm('Kick the selected member from {{ guild.name|escape }}?');">
+                <input type="hidden" name="guild_id" value="{{ guild.id }}">
+                <div class="mb-2">
+                  <label class="form-label small" for="guild-kick-member-{{ guild.id }}">Member</label>
+                  <select class="form-select form-select-sm" id="guild-kick-member-{{ guild.id }}" name="member_id" required>
+                    <option value="">Select a member</option>
+                    {% for option in guild_member_options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small" for="guild-kick-reason-{{ guild.id }}">Reason</label>
+                  <input class="form-control form-control-sm" id="guild-kick-reason-{{ guild.id }}" type="text" name="reason" maxlength="256" placeholder="Web admin kick request">
+                </div>
+                <button class="btn btn-outline-danger btn-sm guild-card-action" type="submit">Kick Member</button>
+              </form>
+              {% elif not members_intent_enabled %}
+              <p class="text-secondary small mb-0">Member picker is limited because `ENABLE_MEMBERS_INTENT` is disabled. Enable it to manage the full guild roster from the web GUI.</p>
+              {% else %}
+              <p class="text-secondary small mb-0">No kickable members are currently available in this guild.</p>
+              {% endif %}
+            </div>
+            {% endif %}
           </div>
         </div>
         {% else %}

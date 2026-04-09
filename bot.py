@@ -5165,6 +5165,46 @@ async def _leave_guild(guild_id: int) -> None:
     await guild.leave()
 
 
+async def _kick_guild_member(guild_id: int, member_id: int, reason: str) -> dict:
+    guild = bot.get_guild(int(guild_id))
+    if guild is None:
+        raise RuntimeError("Guild is not currently available to this bot.")
+    bot_member = guild.me
+    if bot_member is None:
+        raise RuntimeError("Bot member is not available for this guild.")
+    if not guild.me.guild_permissions.kick_members:
+        raise RuntimeError("Bot does not have permission to kick members in this guild.")
+
+    target = guild.get_member(int(member_id))
+    if target is None:
+        try:
+            target = await guild.fetch_member(int(member_id))
+        except discord.NotFound as exc:
+            raise RuntimeError("Selected member is no longer in this guild.") from exc
+        except discord.Forbidden as exc:
+            raise RuntimeError("Bot is not allowed to inspect guild members in this guild.") from exc
+        except discord.HTTPException as exc:
+            raise RuntimeError("Failed to resolve the selected member.") from exc
+
+    if target.bot:
+        raise RuntimeError("Bot accounts cannot be kicked from the web admin.")
+    if target.id == guild.owner_id:
+        raise RuntimeError("The server owner cannot be kicked.")
+    if target.id == bot_member.id:
+        raise RuntimeError("The bot cannot kick itself.")
+    if bot_member.top_role <= target.top_role:
+        raise RuntimeError("Bot can only kick members below its top role.")
+
+    await target.kick(reason=reason)
+    return {
+        "ok": True,
+        "member_id": target.id,
+        "member_name": str(target),
+        "guild_id": guild.id,
+        "guild_name": guild.name,
+    }
+
+
 def run_web_leave_guild(actor_email: str, guild_id: int) -> dict:
     selected_guild_id = int(guild_id)
     guild = bot.get_guild(selected_guild_id) if "bot" in globals() else None
@@ -5186,6 +5226,42 @@ def run_web_leave_guild(actor_email: str, guild_id: int) -> dict:
         guild=str(selected_guild_id),
     )
     return {"ok": True, "message": f"Left guild {guild_name}.", "guild_id": selected_guild_id}
+
+
+def run_web_kick_member(actor_email: str, guild_id: int, member_id: int, reason: str | None = None) -> dict:
+    selected_guild_id = int(guild_id)
+    selected_member_id = int(member_id)
+    kick_reason = (reason or "").strip() or "Web admin kick request"
+    try:
+        future = asyncio.run_coroutine_threadsafe(
+            _kick_guild_member(selected_guild_id, selected_member_id, kick_reason),
+            bot.loop,
+        )
+        result = future.result(timeout=30)
+    except Exception as exc:
+        logger.exception(
+            "Failed to kick member %s in guild %s via web admin (%s): %s",
+            selected_member_id,
+            selected_guild_id,
+            actor_email,
+            exc,
+        )
+        return {"ok": False, "error": f"Failed to kick member: {exc}"}
+
+    record_action_safe(
+        action="kick_member_web",
+        status="success",
+        moderator=actor_email,
+        target=f"{result['member_name']} ({result['member_id']})",
+        reason=kick_reason,
+        guild=str(selected_guild_id),
+    )
+    return {
+        "ok": True,
+        "message": f"Kicked {result['member_name']} from {result['guild_name']}.",
+        "member_id": result["member_id"],
+        "guild_id": result["guild_id"],
+    }
 
 
 class ModerationBot(commands.Bot):
@@ -5250,6 +5326,7 @@ class ModerationBot(commands.Bot):
                 get_spicy_prompts_status=run_web_get_spicy_prompts_status,
                 refresh_spicy_prompts=run_web_refresh_spicy_prompts,
                 pick_random_user=run_web_pick_random_user,
+                kick_member=run_web_kick_member,
                 leave_guild=run_web_leave_guild,
                 request_restart=run_web_request_restart,
                 resolve_youtube_subscription=lambda source_url: resolve_youtube_subscription_seed(source_url),
@@ -5293,6 +5370,7 @@ class ModerationBot(commands.Bot):
                         get_spicy_prompts_status=run_web_get_spicy_prompts_status,
                         refresh_spicy_prompts=run_web_refresh_spicy_prompts,
                         pick_random_user=run_web_pick_random_user,
+                        kick_member=run_web_kick_member,
                         leave_guild=run_web_leave_guild,
                         request_restart=run_web_request_restart,
                         resolve_youtube_subscription=lambda source_url: resolve_youtube_subscription_seed(source_url),
@@ -5383,6 +5461,28 @@ class ModerationBot(commands.Bot):
             options.append({"id": role.id, "name": f"@{role.name}"})
         return options
 
+    def build_web_member_options(self, guild_id: int) -> list[dict]:
+        guild = self.get_guild(guild_id)
+        if guild is None:
+            return []
+        bot_member = guild.me
+        options: list[dict] = []
+        for member in sorted(guild.members, key=lambda item: item.display_name.lower()):
+            if member.bot:
+                continue
+            if member.id == guild.owner_id:
+                continue
+            if bot_member is not None and bot_member.top_role <= member.top_role:
+                continue
+            options.append(
+                {
+                    "id": member.id,
+                    "name": member.display_name,
+                    "username": str(member),
+                }
+            )
+        return options
+
     def get_web_managed_guilds(self) -> list[dict]:
         managed = self.get_managed_guilds()
         primary_guild_id = GUILD_ID_CONFIGURED or (sorted(MANAGED_GUILD_IDS)[0] if MANAGED_GUILD_IDS else None)
@@ -5412,6 +5512,7 @@ class ModerationBot(commands.Bot):
 
         channels = self.build_web_channel_options(guild_id=selected_guild_id)
         roles = self.build_web_role_options(guild_id=selected_guild_id)
+        members = self.build_web_member_options(guild_id=selected_guild_id)
         self.web_channel_options = channels
         self.web_role_options = roles
         if guild is None:
@@ -5421,6 +5522,8 @@ class ModerationBot(commands.Bot):
             "guild": {"id": guild.id, "name": guild.name},
             "channels": channels,
             "roles": roles,
+            "members": members,
+            "members_intent_enabled": ENABLE_MEMBERS_INTENT,
         }
 
     async def on_message(self, message: discord.Message) -> None:
