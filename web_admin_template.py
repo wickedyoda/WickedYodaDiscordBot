@@ -2198,12 +2198,25 @@ PAGE_TEMPLATE = """
               <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
                 <h3 class="h6 mb-0">Visible Members</h3>
                 {% if guild_members %}
-                <span class="badge text-bg-secondary">{{ guild_members|length }}</span>
+                <span class="badge text-bg-secondary" data-member-count>{{ guild_members|length }}</span>
                 {% endif %}
               </div>
               {% if guild_members %}
+              <div class="mb-2">
+                <label class="form-label small" for="guild-member-search-{{ guild.id }}">Search Members</label>
+                <input
+                  class="form-control form-control-sm"
+                  id="guild-member-search-{{ guild.id }}"
+                  type="search"
+                  placeholder="Filter by display name, username, or ID"
+                  data-member-search
+                  data-member-search-target="guild-member-table-{{ guild.id }}"
+                  data-member-count-target="guild-member-count-{{ guild.id }}"
+                >
+                <p class="text-secondary small mt-2 mb-0" id="guild-member-count-{{ guild.id }}">Showing {{ guild_members|length }} of {{ guild_members|length }} visible members.</p>
+              </div>
               <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0">
+                <table class="table table-sm align-middle mb-0" id="guild-member-table-{{ guild.id }}">
                   <thead>
                     <tr>
                       <th scope="col">Display Name</th>
@@ -2213,7 +2226,7 @@ PAGE_TEMPLATE = """
                   </thead>
                   <tbody>
                     {% for member in guild_members %}
-                    <tr>
+                    <tr data-member-row data-member-search-text="{{ (member.name ~ ' ' ~ member.username ~ ' ' ~ member.id)|lower }}">
                       <td>{{ member.name }}</td>
                       <td class="text-secondary small">{{ member.username }}</td>
                       <td class="text-secondary small">{{ member.id }}</td>
@@ -2966,6 +2979,31 @@ PAGE_TEMPLATE = """
           form.appendChild(input);
         });
       }
+
+      document.querySelectorAll("[data-member-search]").forEach((input) => {
+        const tableId = input.getAttribute("data-member-search-target");
+        const countId = input.getAttribute("data-member-count-target");
+        const table = tableId ? document.getElementById(tableId) : null;
+        const countNode = countId ? document.getElementById(countId) : null;
+        if (!table) { return; }
+        const rows = Array.from(table.querySelectorAll("[data-member-row]"));
+        const total = rows.length;
+        const updateRows = () => {
+          const query = String(input.value || "").trim().toLowerCase();
+          let visible = 0;
+          rows.forEach((row) => {
+            const haystack = String(row.getAttribute("data-member-search-text") || "");
+            const matches = !query || haystack.includes(query);
+            row.style.display = matches ? "" : "none";
+            if (matches) { visible += 1; }
+          });
+          if (countNode) {
+            countNode.textContent = `Showing ${visible} of ${total} visible members.`;
+          }
+        };
+        input.addEventListener("input", updateRows);
+        updateRows();
+      });
     })();
   </script>
 </body>
