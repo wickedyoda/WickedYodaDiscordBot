@@ -2381,6 +2381,10 @@ PAGE_TEMPLATE = """
               <label class="form-label" for="new_password">Password</label>
               <input class="form-control" id="new_password" name="password" type="password" required {% if not session.get("is_admin") %}disabled{% endif %}>
             </div>
+            <div class="col-12 col-lg-3">
+              <label class="form-label" for="new_password_confirm">Confirm Password</label>
+              <input class="form-control" id="new_password_confirm" name="confirm_password" type="password" required {% if not session.get("is_admin") %}disabled{% endif %}>
+            </div>
             <div class="col-12 col-lg-2">
               <label class="form-label" for="new_role">Role</label>
               <select class="form-select" id="new_role" name="role" {% if not session.get("is_admin") %}disabled{% endif %}>
@@ -2429,6 +2433,8 @@ PAGE_TEMPLATE = """
                 <td class="small">{{ row.created_at }}</td>
                 <td>
                     <input class="form-control form-control-sm mb-2" name="new_password" type="password" placeholder="Reset password" {% if not session.get("is_admin") %}disabled{% endif %}>
+                    <input class="form-control form-control-sm mb-2" name="confirm_new_password" type="password" placeholder="Confirm new password" {% if not session.get("is_admin") %}disabled{% endif %}>
+                    <input class="form-control form-control-sm mb-2" name="admin_current_password" type="password" placeholder="Your current password" {% if not session.get("is_admin") %}disabled{% endif %}>
                     <button class="btn btn-sm btn-primary me-2" type="submit" {% if not session.get("is_admin") %}disabled{% endif %}>Save</button>
                   </form>
                   {% if row.email != session.get("user") %}

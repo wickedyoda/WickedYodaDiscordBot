@@ -4197,6 +4197,7 @@ def create_app(
         first_name = request.form.get("first_name", "").strip()
         last_name = request.form.get("last_name", "").strip()
         password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
         role = request.form.get("role", "read-only").strip().lower()
         is_admin = role == "admin"
         is_guild_admin = role == "guild-admin"
@@ -4207,6 +4208,9 @@ def create_app(
         password_policy_error = _password_policy_error(password)
         if password_policy_error:
             flash(password_policy_error, "danger")
+            return redirect(url_for("users"))
+        if password != confirm_password:
+            flash("Password confirmation does not match.", "danger")
             return redirect(url_for("users"))
 
         _upsert_user(
@@ -4232,6 +4236,8 @@ def create_app(
         first_name = request.form.get("first_name", "").strip()
         last_name = request.form.get("last_name", "").strip()
         new_password = request.form.get("new_password", "")
+        confirm_new_password = request.form.get("confirm_new_password", "")
+        admin_current_password = request.form.get("admin_current_password", "")
         role = request.form.get("role", "read-only").strip().lower()
         is_admin = role == "admin"
         is_guild_admin = role == "guild-admin"
@@ -4254,6 +4260,22 @@ def create_app(
                 return redirect(url_for("users"))
         password_hash = None
         if new_password:
+            acting_user = _get_user(db_path, current_user)
+            if acting_user is None:
+                flash("Current admin account was not found.", "danger")
+                return redirect(url_for("users"))
+            if not admin_current_password:
+                flash("Your current password is required to reset a password.", "danger")
+                return redirect(url_for("users"))
+            if not check_password_hash(str(acting_user.get("password_hash", "")), admin_current_password):
+                flash("Your current password is incorrect.", "danger")
+                return redirect(url_for("users"))
+            if not confirm_new_password:
+                flash("New password confirmation is required.", "danger")
+                return redirect(url_for("users"))
+            if new_password != confirm_new_password:
+                flash("New password confirmation does not match.", "danger")
+                return redirect(url_for("users"))
             password_policy_error = _password_policy_error(new_password)
             if password_policy_error:
                 flash(password_policy_error, "danger")
@@ -4334,6 +4356,9 @@ def create_app(
                 if password_rotation_required and not new_password:
                     flash(f"Password rotation is required every {PASSWORD_ROTATION_DAYS} days. Set a new password now.", "danger")
                     return redirect(url_for("account"))
+                if new_password and not confirm_new_password:
+                    flash("New password confirmation is required.", "danger")
+                    return redirect(url_for("account"))
                 if new_password and new_password == current_password:
                     flash("New password must be different from the current password.", "danger")
                     return redirect(url_for("account"))
@@ -4390,6 +4415,9 @@ def create_app(
                 return redirect(url_for("account"))
             if not new_password:
                 flash("New password is required.", "danger")
+                return redirect(url_for("account"))
+            if not confirm_new_password:
+                flash("New password confirmation is required.", "danger")
                 return redirect(url_for("account"))
             if new_password == current_password:
                 flash("New password must be different from the current password.", "danger")
