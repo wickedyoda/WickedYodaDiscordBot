@@ -542,6 +542,13 @@ PAGE_TEMPLATE = """
       border-top: 1px solid var(--border);
       padding: 16px;
     }
+    .password-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 8px;
+    }
     @media (max-width: 1180px) {
       .dashboard-hero { grid-template-columns: 1fr; }
     }
@@ -822,6 +829,12 @@ PAGE_TEMPLATE = """
               <div class="mb-3">
                 <label class="form-label" for="password">Password</label>
                 <input class="form-control" id="password" name="password" type="password" required autocomplete="current-password">
+                <div class="password-toggle-row">
+                  <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="show_login_password" data-password-toggle="password">
+                    <label class="form-check-label" for="show_login_password">Show password</label>
+                  </div>
+                </div>
               </div>
               <div class="form-check mb-3">
                 <input class="form-check-input" type="checkbox" id="remember_login" name="remember_login" value="1">
@@ -1213,6 +1226,7 @@ PAGE_TEMPLATE = """
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('overview') }}">Overview</a>
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('guilds_page') }}">Servers</a>
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('guild_settings') }}">Guild Settings</a>
+                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('moderation') }}">Moderation</a>
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('command_permissions') }}">Command Permissions</a>
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('bot_profile') }}">Bot Profile</a>
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('random_user_page') }}">Random User</a>
@@ -1247,6 +1261,7 @@ PAGE_TEMPLATE = """
               <div class="d-grid gap-2">
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('uptime_monitors_page') }}">Uptime Monitors</a>
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('status_page') }}">Status</a>
+                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('observability') }}">Observability</a>
               </div>
             </div>
           </div>
@@ -1257,7 +1272,6 @@ PAGE_TEMPLATE = """
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('users') }}">Users</a>
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('guild_access') }}">Guild Access</a>
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('settings') }}">Settings (Global)</a>
-                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('observability') }}">Observability (Global)</a>
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('logs') }}">Logs (Global)</a>
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('documentation') }}">Documentation (Global)</a>
               </div>
@@ -1268,6 +1282,7 @@ PAGE_TEMPLATE = """
               <h3 class="h6 mb-2">Account</h3>
               <div class="d-grid gap-2">
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('account') }}">My Account</a>
+                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('logout') }}">Logout</a>
               </div>
             </div>
           </div>
@@ -2809,7 +2824,7 @@ PAGE_TEMPLATE = """
           {% if guild_member_options %}
           <div class="row g-3">
             <div class="col-12 col-xl-6">
-              <form method="post" action="{{ url_for('kick_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Kick the selected member from {{ selected_guild_name|escape }}?');">
+              <form method="post" action="{{ url_for('kick_guild_member_route') }}" class="card card-soft p-3 h-100" data-member-confirm="kick" data-confirm-guild="{{ selected_guild_name|escape }}">
                 <input type="hidden" name="guild_id" value="{{ selected_guild_id }}">
                 <h4 class="h6 mb-2">Kick</h4>
                 <div class="mb-2">
@@ -2829,7 +2844,7 @@ PAGE_TEMPLATE = """
               </form>
             </div>
             <div class="col-12 col-xl-6">
-              <form method="post" action="{{ url_for('ban_guild_member_route') }}" class="card card-soft p-3 h-100" onsubmit="return confirm('Ban the selected member from {{ selected_guild_name|escape }}?');">
+              <form method="post" action="{{ url_for('ban_guild_member_route') }}" class="card card-soft p-3 h-100" data-member-confirm="ban" data-confirm-guild="{{ selected_guild_name|escape }}">
                 <input type="hidden" name="guild_id" value="{{ selected_guild_id }}">
                 <h4 class="h6 mb-2">Ban</h4>
                 <div class="mb-2">
@@ -3162,6 +3177,36 @@ PAGE_TEMPLATE = """
           });
         }
         updateRows();
+      });
+
+      document.querySelectorAll("[data-password-toggle]").forEach((toggle) => {
+        const targetId = toggle.getAttribute("data-password-toggle");
+        const target = targetId ? document.getElementById(targetId) : null;
+        if (!target) { return; }
+        toggle.addEventListener("change", () => {
+          target.type = toggle.checked ? "text" : "password";
+        });
+      });
+
+      document.querySelectorAll("form[data-member-confirm]").forEach((form) => {
+        form.addEventListener("submit", (event) => {
+          const action = String(form.getAttribute("data-member-confirm") || "").trim().toLowerCase();
+          const guild = String(form.getAttribute("data-confirm-guild") || "this guild");
+          const memberSelect = form.querySelector("select[name='member_id']");
+          const selectedOption = memberSelect && "selectedOptions" in memberSelect ? memberSelect.selectedOptions[0] : null;
+          const memberLabel = selectedOption ? String(selectedOption.textContent || "").trim() : "the selected member";
+          let message = "";
+          if (action === "kick") {
+            message = `Kick ${memberLabel} from ${guild}? This removes the member immediately.`;
+          } else if (action === "ban") {
+            const deleteDaysSelect = form.querySelector("select[name='delete_days']");
+            const deleteDays = deleteDaysSelect ? String(deleteDaysSelect.value || "0").trim() : "0";
+            message = `Ban ${memberLabel} from ${guild}? This removes the member immediately and deletes ${deleteDays} day(s) of message history.`;
+          }
+          if (message && !window.confirm(message)) {
+            event.preventDefault();
+          }
+        });
       });
     })();
   </script>
