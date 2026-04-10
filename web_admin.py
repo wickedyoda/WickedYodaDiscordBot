@@ -1705,10 +1705,6 @@ def _read_process_io_bytes() -> dict[str, int | None]:
     return {"read_bytes": read_bytes, "write_bytes": write_bytes}
 
 
-
-
-
-
 def create_app(
     db_path: str,
     get_bot_snapshot: Callable[[], dict],
@@ -1730,6 +1726,10 @@ def create_app(
     pick_random_user: Callable[[int, int | None], dict] | Callable[[int], dict] | None = None,
     get_spicy_prompts_status: Callable[[], dict] | None = None,
     refresh_spicy_prompts: Callable[[str], dict] | None = None,
+    kick_member: Callable[[str, int, int, str], dict] | None = None,
+    ban_member: Callable[[str, int, int, str, int], dict] | None = None,
+    timeout_member: Callable[[str, int, int, int, str], dict] | None = None,
+    untimeout_member: Callable[[str, int, int, str], dict] | None = None,
     leave_guild: Callable[[str, int], dict] | None = None,
     request_restart: Callable[[str], dict] | None = None,
     resolve_youtube_subscription: Callable[[str], dict] | None = None,
@@ -1967,6 +1967,38 @@ def create_app(
             return get_discord_catalog()  # type: ignore[misc]
         except TypeError:
             return {}
+
+    def _call_kick_member(actor: str, guild_id: int, member_id: int, reason: str) -> dict:
+        if not callable(kick_member):
+            return {"ok": False, "error": "Kick member callback not configured."}
+        try:
+            return kick_member(actor, guild_id, member_id, reason)
+        except Exception as exc:
+            return {"ok": False, "error": f"Kick member callback failed: {exc}"}
+
+    def _call_ban_member(actor: str, guild_id: int, member_id: int, reason: str, delete_days: int) -> dict:
+        if not callable(ban_member):
+            return {"ok": False, "error": "Ban member callback not configured."}
+        try:
+            return ban_member(actor, guild_id, member_id, reason, delete_days)
+        except Exception as exc:
+            return {"ok": False, "error": f"Ban member callback failed: {exc}"}
+
+    def _call_timeout_member(actor: str, guild_id: int, member_id: int, minutes: int, reason: str) -> dict:
+        if not callable(timeout_member):
+            return {"ok": False, "error": "Timeout member callback not configured."}
+        try:
+            return timeout_member(actor, guild_id, member_id, minutes, reason)
+        except Exception as exc:
+            return {"ok": False, "error": f"Timeout member callback failed: {exc}"}
+
+    def _call_untimeout_member(actor: str, guild_id: int, member_id: int, reason: str) -> dict:
+        if not callable(untimeout_member):
+            return {"ok": False, "error": "Untimeout member callback not configured."}
+        try:
+            return untimeout_member(actor, guild_id, member_id, reason)
+        except Exception as exc:
+            return {"ok": False, "error": f"Untimeout member callback failed: {exc}"}
 
     def _call_get_command_permissions(guild_id: int | None) -> dict:
         if not callable(get_command_permissions):
@@ -2677,20 +2709,132 @@ def create_app(
     def guilds_page():
         selected_guild_id, guild_options, _ = _selected_guild_context()
         guild_cards = []
+        selected_guild_card: dict | None = None
         for guild in guild_options:
-            guild_cards.append(
-                {
-                    "id": guild["id"],
-                    "name": guild["name"],
-                    "selected": selected_guild_id == guild["id"],
-                    "member_count": guild.get("member_count"),
-                }
-            )
+            card = {
+                "id": guild["id"],
+                "name": guild["name"],
+                "selected": selected_guild_id == guild["id"],
+                "member_count": guild.get("member_count"),
+            }
+            guild_cards.append(card)
+            if card["selected"]:
+                selected_guild_card = card
         return _render_page(
             "guilds",
             "Discord Servers",
             guild_cards=guild_cards,
+            selected_guild_card=selected_guild_card,
         )
+
+    @app.post("/admin/guilds/kick")
+    @login_required
+    def kick_guild_member_route():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("moderation")
+        raw_guild_id = request.form.get("guild_id", "").strip()
+        raw_member_id = request.form.get("member_id", "").strip()
+        reason = request.form.get("reason", "").strip() or "Web admin kick request"
+        if not raw_guild_id.isdigit() or not raw_member_id.isdigit():
+            flash("Select a valid guild and member.", "danger")
+            return redirect(url_for("moderation"))
+        result = _call_kick_member(
+            str(session.get("user", "")),
+            int(raw_guild_id),
+            int(raw_member_id),
+            reason,
+        )
+        if isinstance(result, dict) and result.get("ok"):
+            flash(str(result.get("message", "Member kicked.")), "success")
+        else:
+            flash(
+                str(result.get("error", "Failed to kick member.")) if isinstance(result, dict) else "Failed to kick member.",
+                "danger",
+            )
+        return redirect(url_for("moderation", guild_id=raw_guild_id))
+
+    @app.post("/admin/guilds/ban")
+    @login_required
+    def ban_guild_member_route():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("moderation")
+        raw_guild_id = request.form.get("guild_id", "").strip()
+        raw_member_id = request.form.get("member_id", "").strip()
+        raw_delete_days = request.form.get("delete_days", "0").strip()
+        reason = request.form.get("reason", "").strip() or "Web admin ban request"
+        if not raw_guild_id.isdigit() or not raw_member_id.isdigit():
+            flash("Select a valid guild and member.", "danger")
+            return redirect(url_for("moderation"))
+        delete_days = int(raw_delete_days) if raw_delete_days.isdigit() else 0
+        result = _call_ban_member(
+            str(session.get("user", "")),
+            int(raw_guild_id),
+            int(raw_member_id),
+            reason,
+            delete_days,
+        )
+        if isinstance(result, dict) and result.get("ok"):
+            flash(str(result.get("message", "Member banned.")), "success")
+        else:
+            flash(
+                str(result.get("error", "Failed to ban member.")) if isinstance(result, dict) else "Failed to ban member.",
+                "danger",
+            )
+        return redirect(url_for("moderation", guild_id=raw_guild_id))
+
+    @app.post("/admin/guilds/timeout")
+    @login_required
+    def timeout_guild_member_route():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("moderation")
+        raw_guild_id = request.form.get("guild_id", "").strip()
+        raw_member_id = request.form.get("member_id", "").strip()
+        raw_minutes = request.form.get("minutes", "").strip()
+        reason = request.form.get("reason", "").strip() or "Web admin timeout request"
+        if not raw_guild_id.isdigit() or not raw_member_id.isdigit() or not raw_minutes.isdigit():
+            flash("Select a valid guild, member, and timeout duration.", "danger")
+            return redirect(url_for("moderation"))
+        result = _call_timeout_member(
+            str(session.get("user", "")),
+            int(raw_guild_id),
+            int(raw_member_id),
+            int(raw_minutes),
+            reason,
+        )
+        if isinstance(result, dict) and result.get("ok"):
+            flash(str(result.get("message", "Member timed out.")), "success")
+        else:
+            flash(
+                str(result.get("error", "Failed to timeout member.")) if isinstance(result, dict) else "Failed to timeout member.",
+                "danger",
+            )
+        return redirect(url_for("moderation", guild_id=raw_guild_id))
+
+    @app.post("/admin/guilds/untimeout")
+    @login_required
+    def untimeout_guild_member_route():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("moderation")
+        raw_guild_id = request.form.get("guild_id", "").strip()
+        raw_member_id = request.form.get("member_id", "").strip()
+        reason = request.form.get("reason", "").strip() or "Web admin untimeout request"
+        if not raw_guild_id.isdigit() or not raw_member_id.isdigit():
+            flash("Select a valid guild and member.", "danger")
+            return redirect(url_for("moderation"))
+        result = _call_untimeout_member(
+            str(session.get("user", "")),
+            int(raw_guild_id),
+            int(raw_member_id),
+            reason,
+        )
+        if isinstance(result, dict) and result.get("ok"):
+            flash(str(result.get("message", "Timeout removed.")), "success")
+        else:
+            flash(
+                str(result.get("error", "Failed to remove timeout.")) if isinstance(result, dict) else "Failed to remove timeout.",
+                "danger",
+            )
+        return redirect(url_for("moderation", guild_id=raw_guild_id))
 
     @app.post("/admin/guilds/leave")
     @admin_required
@@ -3924,6 +4068,7 @@ def create_app(
                 )
 
         settings_payload = _call_get_guild_settings(selected_guild_id)
+        catalog_payload = _call_get_discord_catalog(selected_guild_id)
         moderation_settings = settings_payload if isinstance(settings_payload, dict) else {}
         moderation_settings = {
             "moderation_enabled": bool(int(moderation_settings.get("moderation_enabled", 0) or 0)),
@@ -3934,6 +4079,28 @@ def create_app(
             "moderation_timeout_minutes": int(moderation_settings.get("moderation_timeout_minutes", 10) or 10),
         }
         moderation_words_text = "\n".join([str(word) for word in moderation_settings["moderation_words"] if str(word).strip()])
+        member_options: list[dict] = []
+        visible_members: list[dict] = []
+        members_intent_enabled = False
+        if isinstance(catalog_payload, dict) and catalog_payload.get("ok"):
+            members_intent_enabled = bool(catalog_payload.get("members_intent_enabled"))
+            for member in catalog_payload.get("members", []) or []:
+                member_id_value = str(member.get("id") or "").strip()
+                member_name = str(member.get("name") or "").strip()
+                member_username = str(member.get("username") or "").strip()
+                if not member_id_value or not member_name:
+                    continue
+                label = member_name
+                if member_username and member_username != member_name:
+                    label = f"{member_name} ({member_username})"
+                member_options.append({"value": member_id_value, "label": label})
+                visible_members.append(
+                    {
+                        "id": member_id_value,
+                        "name": member_name,
+                        "username": member_username or member_name,
+                    }
+                )
         return _render_page(
             "moderation",
             "Moderation",
@@ -3942,6 +4109,9 @@ def create_app(
             moderation_window_options=[24, 48, 72, 96, 168],
             moderation_threshold_options=[1, 2, 3, 4, 5],
             moderation_timeout_options=[5, 10, 30, 60, 120, 1440],
+            guild_member_options=member_options,
+            guild_members=visible_members,
+            members_intent_enabled=members_intent_enabled,
         )
 
     @app.get("/admin/users")
@@ -4331,6 +4501,10 @@ def start_web_admin(
     pick_random_user: Callable[[int, int | None], dict] | Callable[[int], dict] | None = None,
     get_spicy_prompts_status: Callable[[], dict] | None = None,
     refresh_spicy_prompts: Callable[[str], dict] | None = None,
+    kick_member: Callable[[str, int, int, str], dict] | None = None,
+    ban_member: Callable[[str, int, int, str, int], dict] | None = None,
+    timeout_member: Callable[[str, int, int, int, str], dict] | None = None,
+    untimeout_member: Callable[[str, int, int, str], dict] | None = None,
     leave_guild: Callable[[str, int], dict] | None = None,
     request_restart: Callable[[str], dict] | None = None,
     resolve_youtube_subscription: Callable[[str], dict] | None = None,
@@ -4362,6 +4536,10 @@ def start_web_admin(
         pick_random_user=pick_random_user,
         get_spicy_prompts_status=get_spicy_prompts_status,
         refresh_spicy_prompts=refresh_spicy_prompts,
+        kick_member=kick_member,
+        ban_member=ban_member,
+        timeout_member=timeout_member,
+        untimeout_member=untimeout_member,
         leave_guild=leave_guild,
         request_restart=request_restart,
         resolve_youtube_subscription=resolve_youtube_subscription,
