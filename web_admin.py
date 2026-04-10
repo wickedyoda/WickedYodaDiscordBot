@@ -1705,10 +1705,6 @@ def _read_process_io_bytes() -> dict[str, int | None]:
     return {"read_bytes": read_bytes, "write_bytes": write_bytes}
 
 
-
-
-
-
 def create_app(
     db_path: str,
     get_bot_snapshot: Callable[[], dict],
