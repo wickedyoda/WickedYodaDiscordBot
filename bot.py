@@ -26,7 +26,7 @@ from defusedxml import ElementTree as DefusedET
 from discord import app_commands
 from discord.ext import commands
 
-from bot_constants import (
+from core.bot_constants import (
     COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR,
     COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC,
     COMMAND_PERMISSION_METADATA,
@@ -51,8 +51,8 @@ from bot_constants import (
     YOUTUBE_POST_ID_PATTERN,
     YOUTUBE_TEXT_PATTERN,
 )
-from moderation_filter import apply_moderation_filter
-from web_admin import start_web_admin
+from core.moderation_filter import apply_moderation_filter
+from webui import start_web_admin
 
 logging.basicConfig(
     level=logging.INFO,

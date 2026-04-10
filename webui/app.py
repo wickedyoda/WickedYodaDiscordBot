@@ -17,7 +17,7 @@ from urllib.parse import urlparse, urlunparse
 from flask import Flask, flash, redirect, render_template_string, request, send_file, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from web_admin_constants import (
+from webui.constants import (
     AUTH_MODE_REMEMBER,
     AUTH_MODE_STANDARD,
     AUTO_REFRESH_INTERVAL_OPTIONS,
@@ -35,7 +35,7 @@ from web_admin_constants import (
     UPTIME_MONITOR_INTERVAL_OPTIONS,
     UPTIME_MONITOR_TIMEOUT_OPTIONS,
 )
-from web_admin_template import PAGE_TEMPLATE
+from webui.template import PAGE_TEMPLATE
 
 
 def _is_sensitive_key(key: str) -> bool:

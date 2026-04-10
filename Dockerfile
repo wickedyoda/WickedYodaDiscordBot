@@ -11,7 +11,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir -r requirements.txt
 
-COPY bot.py bot_constants.py moderation_filter.py web_admin.py web_admin_constants.py web_admin_template.py ./
+COPY bot.py ./
+COPY core /app/core
+COPY webui /app/webui
 COPY scripts/entrypoint.sh /app/entrypoint.sh
 RUN mkdir -p /app/data /logs \
     && useradd --create-home --shell /usr/sbin/nologin botuser \

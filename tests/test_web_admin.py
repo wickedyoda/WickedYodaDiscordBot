@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from werkzeug.security import generate_password_hash
 
-from web_admin import _ensure_spicy_prompt_tables, create_app
+from webui import _ensure_spicy_prompt_tables, create_app
 
 
 def _bot_snapshot() -> dict:
