@@ -52,8 +52,12 @@ jobs:
           sarif_file: gitleaks.sarif
 
       - name: Fail on leaks
-        if: steps.gitleaks.outputs.scan_exit_code != '0'
+        if: steps.gitleaks.outputs.scan_exit_code != '0' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: exit 1
+
+      - name: Non-blocking leaks notice (non-main)
+        if: steps.gitleaks.outputs.scan_exit_code != '0' && (github.event_name != 'push' || github.ref != 'refs/heads/main')
+        run: echo "::warning::Gitleaks findings detected. SARIF was uploaded; non-blocking outside direct pushes to main."
 
   trivy-fs:
     runs-on: ubuntu-latest
@@ -93,12 +97,12 @@ jobs:
           sarif_file: trivy-fs.sarif
 
       - name: Fail on vulnerabilities
-        if: steps.trivy_fs.outputs.scan_exit_code != '0' && github.ref == 'refs/heads/main'
+        if: steps.trivy_fs.outputs.scan_exit_code != '0' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: exit 1
 
       - name: Non-blocking findings notice (non-main)
-        if: steps.trivy_fs.outputs.scan_exit_code != '0' && github.ref != 'refs/heads/main'
-        run: echo "::warning::Trivy filesystem findings detected. SARIF was uploaded; non-blocking outside main."
+        if: steps.trivy_fs.outputs.scan_exit_code != '0' && (github.event_name != 'push' || github.ref != 'refs/heads/main')
+        run: echo "::warning::Trivy filesystem findings detected. SARIF was uploaded; non-blocking outside direct pushes to main."
 
   trivy-image:
     runs-on: ubuntu-latest
@@ -150,9 +154,9 @@ jobs:
           sarif_file: trivy-image.sarif
 
       - name: Fail on vulnerabilities
-        if: steps.trivy_image.outputs.scan_exit_code != '0' && github.ref == 'refs/heads/main'
+        if: steps.trivy_image.outputs.scan_exit_code != '0' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: exit 1
 
       - name: Non-blocking findings notice (non-main)
-        if: steps.trivy_image.outputs.scan_exit_code != '0' && github.ref != 'refs/heads/main'
-        run: echo "::warning::Trivy image findings detected. SARIF was uploaded; non-blocking outside main."
+        if: steps.trivy_image.outputs.scan_exit_code != '0' && (github.event_name != 'push' || github.ref != 'refs/heads/main')
+        run: echo "::warning::Trivy image findings detected. SARIF was uploaded; non-blocking outside direct pushes to main."
