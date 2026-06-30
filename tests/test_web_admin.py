@@ -138,6 +138,94 @@ def test_login_and_home_access(tmp_path: Path, monkeypatch) -> None:
     assert b"Control Center" in response.data
 
 
+def test_login_page_shows_forgot_password_link_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+    monkeypatch.setenv("WEB_PASSWORD_RESET_ENABLED", "true")
+    app = create_app(str(tmp_path / "actions.db"), _bot_snapshot)
+    client = app.test_client()
+
+    response = client.get("/login")
+
+    assert response.status_code == 200
+    assert b"Forgot your password?" in response.data
+
+
+def test_password_reset_email_flow_updates_password(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+    monkeypatch.setenv("WEB_PASSWORD_RESET_ENABLED", "true")
+    monkeypatch.setenv("WEB_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("WEB_SMTP_FROM_EMAIL", "noreply@example.com")
+    monkeypatch.setenv("WEB_PUBLIC_BASE_URL", "https://admin.example.com")
+    sent_messages: list[str] = []
+
+    class DummySMTP:
+        def __init__(self, host: str, port: int, timeout: int):
+            assert host == "smtp.example.com"
+            assert port == 587
+            assert timeout == 15
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, username: str, password: str):
+            raise AssertionError("SMTP login should not be called without credentials")
+
+        def send_message(self, message):
+            sent_messages.append(message.get_body(preferencelist=("plain",)).get_content())
+
+    monkeypatch.setattr("webui.app.smtplib.SMTP", DummySMTP)
+
+    app = create_app(str(tmp_path / "actions.db"), _bot_snapshot)
+    client = app.test_client()
+
+    forgot_page = client.get("/forgot-password")
+    csrf_token = _extract_csrf_token(forgot_page.data)
+    forgot_response = client.post(
+        "/forgot-password",
+        data={"email": "admin@example.com", "csrf_token": csrf_token},
+        follow_redirects=True,
+    )
+
+    assert forgot_response.status_code == 200
+    assert b"If that email is registered, a password reset link will be sent." in forgot_response.data
+    assert len(sent_messages) == 1
+    token_match = re.search(r"/reset-password/([A-Za-z0-9_\\-]+)", sent_messages[0])
+    assert token_match is not None
+    reset_token = token_match.group(1)
+
+    reset_page = client.get(f"/reset-password/{reset_token}")
+    reset_csrf = _extract_csrf_token(reset_page.data)
+    reset_response = client.post(
+        f"/reset-password/{reset_token}",
+        data={
+            "new_password": "ResetPass123!",
+            "confirm_new_password": "ResetPass123!",
+            "csrf_token": reset_csrf,
+        },
+        follow_redirects=True,
+    )
+
+    assert reset_response.status_code == 200
+    assert b"Password reset complete. Sign in with your new password." in reset_response.data
+
+    login_response = client.post(
+        "/login",
+        data={"username": "admin@example.com", "password": "ResetPass123!"},
+        follow_redirects=True,
+    )
+
+    assert login_response.status_code == 200
+    assert b"Control Center" in login_response.data
+
+
 def test_account_profile_update_changes_email_and_names(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
     monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
