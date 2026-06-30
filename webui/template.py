@@ -614,6 +614,9 @@ PAGE_TEMPLATE = """
         <span class="header-version">{{ snapshot.server_time if snapshot and snapshot.server_time else "n/a" }}</span>
       </div>
       <div class="header-tools">
+        {% if snapshot and snapshot.invite_url %}
+        <a class="btn" href="{{ snapshot.invite_url }}" target="_blank" rel="noreferrer">Invite Bot</a>
+        {% endif %}
         {% if session.get("user") %}
         <details class="mobile-nav">
           <summary>Menu</summary>
@@ -660,6 +663,9 @@ PAGE_TEMPLATE = """
             <div class="mobile-panel-section">
               <p class="mobile-panel-title">Primary Actions</p>
               <div class="mobile-link-grid">
+                {% if snapshot and snapshot.invite_url %}
+                <a class="btn" href="{{ snapshot.invite_url }}" target="_blank" rel="noreferrer">Invite Bot</a>
+                {% endif %}
                 <a class="btn secondary" href="{{ url_for('guilds_page') }}">Servers</a>
                 <a class="btn secondary" href="{{ url_for('account') }}">My Account</a>
                 <a class="btn secondary" href="{{ url_for('member_activity_page') }}">Member Activity</a>
@@ -699,6 +705,9 @@ PAGE_TEMPLATE = """
         <span>{{ selected_guild_name or "No server selected" }}</span>
       </div>
       <div class="mobile-link-grid">
+        {% if snapshot and snapshot.invite_url %}
+        <a class="btn" href="{{ snapshot.invite_url }}" target="_blank" rel="noreferrer">Invite Bot</a>
+        {% endif %}
         <a class="btn secondary" href="{{ url_for('guilds_page') }}">Servers</a>
         <a class="btn secondary" href="{{ url_for('account') }}">My Account</a>
         <a class="btn secondary" href="{{ url_for('member_activity_page') }}">Member Activity</a>
@@ -712,6 +721,9 @@ PAGE_TEMPLATE = """
         <nav class="nav-controls">
           <span class="current-user">{{ session.get("display_name") or session.get("user") }}{% if session.get("is_admin") %} (Admin){% elif session.get("is_guild_admin") %} (Guild Admin){% else %} (Read Only){% endif %}</span>
           {% if selected_guild_name %}<span class="current-user">Server: {{ selected_guild_name }}</span>{% endif %}
+          {% if snapshot and snapshot.invite_url %}
+          <a class="btn" href="{{ snapshot.invite_url }}" target="_blank" rel="noreferrer">Invite Bot</a>
+          {% endif %}
           <a class="btn secondary" href="{{ url_for('guilds_page') }}">Servers</a>
           <a class="btn secondary" href="{{ url_for('dashboard') }}">Dashboard</a>
           <a class="btn secondary" href="{{ url_for('logout') }}">Logout</a>

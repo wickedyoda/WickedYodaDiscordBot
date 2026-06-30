@@ -5281,6 +5281,12 @@ class ModerationBot(commands.Bot):
     def get_web_snapshot(self) -> dict:
         latency_ms = max(int(self.latency * 1000), 0) if self.is_ready() else 0
         managed = self.get_managed_guilds()
+        invite_url = ""
+        if self.user is not None:
+            invite_url = discord.utils.oauth_url(
+                self.user.id,
+                scopes=("bot", "applications.commands"),
+            )
         return {
             "bot_name": str(self.user) if self.user else "Starting...",
             "bot_ready": bool(self.is_ready()),
@@ -5290,6 +5296,7 @@ class ModerationBot(commands.Bot):
             "commands_synced": self.commands_synced,
             "started_at": self.started_at.isoformat(),
             "server_time": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "invite_url": invite_url,
         }
 
     def build_web_channel_options(self, guild_id: int) -> list[dict]:
