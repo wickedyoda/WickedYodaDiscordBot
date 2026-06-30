@@ -1,15 +1,19 @@
+import hashlib
 import io
 import json
 import logging
 import os
 import secrets
+import smtplib
 import sqlite3
+import ssl
 import threading
 import time
 import zipfile
 from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from email.message import EmailMessage
 from functools import wraps
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
@@ -1124,6 +1128,7 @@ def _validate_settings_payload(
                 "Bot_Log_Channel",
                 "WEB_PORT",
                 "WEB_TLS_PORT",
+                "WEB_SMTP_PORT",
                 "WEB_AVATAR_MAX_UPLOAD_BYTES",
                 "MEMBER_ACTIVITY_BACKFILL_GUILD_ID",
                 "MEMBER_ACTIVITY_BACKFILL_PROGRESS_LOG_INTERVAL",
@@ -1136,6 +1141,14 @@ def _validate_settings_payload(
         if key == "WEB_ADMIN_DEFAULT_USERNAME" and raw_value and not _is_valid_email(raw_value):
             errors.append("WEB_ADMIN_DEFAULT_USERNAME must be a valid email address.")
             continue
+        if key == "WEB_SMTP_FROM_EMAIL" and raw_value and not _is_valid_email(raw_value):
+            errors.append("WEB_SMTP_FROM_EMAIL must be a valid email address.")
+            continue
+        if key == "WEB_PUBLIC_BASE_URL" and raw_value:
+            parsed = urlparse(raw_value)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                errors.append("WEB_PUBLIC_BASE_URL must start with http:// or https:// and include a host.")
+                continue
         if key == "WEB_ADMIN_DEFAULT_PASSWORD" and raw_value:
             password_policy_error = _password_policy_error(raw_value)
             if password_policy_error:
@@ -1321,6 +1334,27 @@ def _ensure_users_table(db_path: str) -> None:
             conn.execute("UPDATE web_users SET password_changed_at = COALESCE(password_changed_at, created_at)")
         if "is_guild_admin" not in columns:
             conn.execute("ALTER TABLE web_users ADD COLUMN is_guild_admin INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+
+
+def _ensure_password_reset_table(db_path: str) -> None:
+    directory = os.path.dirname(db_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with _sqlite_connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS web_password_resets (
+                token_hash TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_web_password_resets_email ON web_password_resets(email)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_web_password_resets_expires_at ON web_password_resets(expires_at)")
         conn.commit()
 
 
@@ -1614,10 +1648,76 @@ def _update_user_record(
 
 def _update_user_password_hash_only(db_path: str, email: str, password_hash: str) -> None:
     _ensure_users_table(db_path)
+    changed_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     with _sqlite_connect(db_path) as conn:
         conn.execute(
-            "UPDATE web_users SET password_hash = ? WHERE email = ?",
-            (password_hash, email.strip().lower()),
+            "UPDATE web_users SET password_hash = ?, password_changed_at = ? WHERE email = ?",
+            (password_hash, changed_at, email.strip().lower()),
+        )
+        conn.commit()
+
+
+def _password_reset_token_hash(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def _cleanup_password_reset_tokens(db_path: str) -> None:
+    _ensure_password_reset_table(db_path)
+    now_text = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    with _sqlite_connect(db_path) as conn:
+        conn.execute(
+            "DELETE FROM web_password_resets WHERE used_at IS NOT NULL OR expires_at <= ?",
+            (now_text,),
+        )
+        conn.commit()
+
+
+def _create_password_reset_token(db_path: str, email: str, *, ttl_minutes: int = 30) -> str:
+    _ensure_password_reset_table(db_path)
+    _cleanup_password_reset_tokens(db_path)
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = _password_reset_token_hash(raw_token)
+    now = datetime.now(UTC)
+    created_at = now.strftime("%Y-%m-%d %H:%M:%S")
+    expires_at = (now + timedelta(minutes=max(5, ttl_minutes))).strftime("%Y-%m-%d %H:%M:%S")
+    with _sqlite_connect(db_path) as conn:
+        conn.execute("DELETE FROM web_password_resets WHERE email = ?", (email.strip().lower(),))
+        conn.execute(
+            """
+            INSERT INTO web_password_resets (token_hash, email, created_at, expires_at, used_at)
+            VALUES (?, ?, ?, ?, NULL)
+            """,
+            (token_hash, email.strip().lower(), created_at, expires_at),
+        )
+        conn.commit()
+    return raw_token
+
+
+def _get_password_reset_email(db_path: str, raw_token: str) -> str | None:
+    _ensure_password_reset_table(db_path)
+    _cleanup_password_reset_tokens(db_path)
+    token_hash = _password_reset_token_hash(raw_token)
+    now_text = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    with _sqlite_connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT email
+            FROM web_password_resets
+            WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?
+            """,
+            (token_hash, now_text),
+        ).fetchone()
+    return str(row[0]).strip().lower() if row else None
+
+
+def _mark_password_reset_used(db_path: str, raw_token: str) -> None:
+    _ensure_password_reset_table(db_path)
+    token_hash = _password_reset_token_hash(raw_token)
+    used_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    with _sqlite_connect(db_path) as conn:
+        conn.execute(
+            "UPDATE web_password_resets SET used_at = ? WHERE token_hash = ?",
+            (used_at, token_hash),
         )
         conn.commit()
 
@@ -1740,6 +1840,7 @@ def create_app(
     app = Flask(__name__)
     _ensure_users_table(db_path)
     _ensure_guild_access_tables(db_path)
+    _ensure_password_reset_table(db_path)
     configured_secret = os.getenv("WEB_ADMIN_SESSION_SECRET")
     if configured_secret:
         app.secret_key = configured_secret
@@ -1758,6 +1859,11 @@ def create_app(
     login_window_seconds = 15 * 60
     login_max_attempts = 6
     login_attempts: dict[str, list[float]] = {}
+    password_reset_enabled = _env_bool("WEB_PASSWORD_RESET_ENABLED", False)
+    password_reset_ttl_minutes = 30
+    password_reset_window_seconds = 15 * 60
+    password_reset_max_attempts = 5
+    password_reset_attempts: dict[str, list[float]] = {}
     max_avatar_upload_bytes = max(1024, _env_int("WEB_AVATAR_MAX_UPLOAD_BYTES", 2 * 1024 * 1024))
     restart_enabled = _env_bool("WEB_RESTART_ENABLED", False)
     observability_started_monotonic = time.monotonic()
@@ -1924,6 +2030,74 @@ def create_app(
                     break
         return selected_id, options, selected_name
 
+    def _prune_password_reset_attempts(client_ip: str) -> list[float]:
+        now_ts = time.time()
+        entries = password_reset_attempts.get(client_ip, [])
+        fresh_entries = [ts for ts in entries if (now_ts - ts) < password_reset_window_seconds]
+        if fresh_entries:
+            password_reset_attempts[client_ip] = fresh_entries
+        else:
+            password_reset_attempts.pop(client_ip, None)
+        return fresh_entries
+
+    def _password_reset_security_mode() -> str:
+        return str(os.getenv("WEB_SMTP_SECURITY", "starttls")).strip().lower() or "starttls"
+
+    def _password_reset_mail_ready() -> bool:
+        return bool(password_reset_enabled and os.getenv("WEB_SMTP_HOST", "").strip() and os.getenv("WEB_SMTP_FROM_EMAIL", "").strip())
+
+    def _password_reset_base_url() -> str:
+        configured = str(os.getenv("WEB_PUBLIC_BASE_URL", "")).strip().rstrip("/")
+        if configured:
+            return configured
+        return request.url_root.rstrip("/")
+
+    def _build_password_reset_link(raw_token: str) -> str:
+        return f"{_password_reset_base_url()}{url_for('password_reset_confirm', token=raw_token)}"
+
+    def _send_password_reset_email(target_email: str, raw_token: str) -> None:
+        smtp_host = os.getenv("WEB_SMTP_HOST", "").strip()
+        from_email = os.getenv("WEB_SMTP_FROM_EMAIL", "").strip()
+        if not smtp_host or not from_email:
+            raise RuntimeError("SMTP host and from address are required.")
+        smtp_port = _env_int("WEB_SMTP_PORT", 587)
+        smtp_username = os.getenv("WEB_SMTP_USERNAME", "").strip()
+        smtp_password = os.getenv("WEB_SMTP_PASSWORD", "")
+        smtp_from_name = os.getenv("WEB_SMTP_FROM_NAME", "").strip() or "Wicked Yoda Bot Admin"
+        security_mode = _password_reset_security_mode()
+        reset_link = _build_password_reset_link(raw_token)
+
+        message = EmailMessage()
+        message["Subject"] = "Wicked Yoda Bot Admin password reset"
+        message["From"] = f"{smtp_from_name} <{from_email}>"
+        message["To"] = target_email
+        message.set_content(
+            "\n".join(
+                [
+                    "A password reset was requested for your Wicked Yoda Bot Admin account.",
+                    "",
+                    f"Reset link: {reset_link}",
+                    "",
+                    f"This link expires in {password_reset_ttl_minutes} minutes and can only be used once.",
+                    "If you did not request this, you can ignore this email.",
+                ]
+            )
+        )
+
+        if security_mode == "ssl":
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15, context=ssl.create_default_context()) as server:
+                if smtp_username:
+                    server.login(smtp_username, smtp_password)
+                server.send_message(message)
+            return
+
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            if security_mode == "starttls":
+                server.starttls(context=ssl.create_default_context())
+            if smtp_username:
+                server.login(smtp_username, smtp_password)
+            server.send_message(message)
+
     def _render_page(page: str, title: str, **kwargs):
         selected_guild_id, guild_options, selected_guild_name = _selected_guild_context()
         if "snapshot" not in kwargs:
@@ -1939,6 +2113,7 @@ def create_app(
             restart_enabled=restart_enabled,
             feed_interval_options=[{"value": value, "label": label} for value, label in FEED_INTERVAL_OPTIONS],
             can_manage_guild=_current_user_is_admin() or _current_user_is_guild_admin(),
+            password_reset_enabled=password_reset_enabled,
             **kwargs,
         )
 
@@ -2593,6 +2768,77 @@ def create_app(
             login_attempts[client_ip] = attempts[-login_max_attempts:]
             flash("Invalid credentials.", "danger")
         return _render_page("login", "Web Admin Login")
+
+    @app.route("/forgot-password", methods=["GET", "POST"])
+    def forgot_password():
+        if not password_reset_enabled:
+            flash("Password reset by email is not enabled for this deployment.", "warning")
+            return redirect(url_for("login"))
+        if request.method == "POST":
+            client_ip = _client_ip()
+            attempts = _prune_password_reset_attempts(client_ip)
+            if len(attempts) >= password_reset_max_attempts:
+                flash("Too many reset attempts. Try again in 15 minutes.", "danger")
+                return redirect(url_for("forgot_password"))
+
+            email = request.form.get("email", "").strip().lower()
+            generic_message = "If that email is registered, a password reset link will be sent."
+            attempts.append(time.time())
+            password_reset_attempts[client_ip] = attempts[-password_reset_max_attempts:]
+
+            user = _get_user(db_path, email) if _is_valid_email(email) else None
+            if user is not None and _password_reset_mail_ready():
+                try:
+                    raw_token = _create_password_reset_token(
+                        db_path,
+                        email,
+                        ttl_minutes=password_reset_ttl_minutes,
+                    )
+                    _send_password_reset_email(email, raw_token)
+                except Exception:
+                    app.logger.exception("Failed to send password reset email for %s", email)
+            flash(generic_message, "info")
+            return redirect(url_for("login"))
+        return _render_page("forgot_password", "Forgot Password")
+
+    @app.route("/reset-password/<token>", methods=["GET", "POST"])
+    def password_reset_confirm(token: str):
+        if not password_reset_enabled:
+            flash("Password reset by email is not enabled for this deployment.", "warning")
+            return redirect(url_for("login"))
+        reset_email = _get_password_reset_email(db_path, token)
+        if not reset_email:
+            flash("This password reset link is invalid or has expired.", "danger")
+            return redirect(url_for("login"))
+        if request.method == "POST":
+            new_password = request.form.get("new_password", "")
+            confirm_new_password = request.form.get("confirm_new_password", "")
+            if not new_password:
+                flash("New password is required.", "danger")
+                return redirect(url_for("password_reset_confirm", token=token))
+            if not confirm_new_password:
+                flash("New password confirmation is required.", "danger")
+                return redirect(url_for("password_reset_confirm", token=token))
+            if new_password != confirm_new_password:
+                flash("New password confirmation does not match.", "danger")
+                return redirect(url_for("password_reset_confirm", token=token))
+            password_policy_error = _password_policy_error(new_password)
+            if password_policy_error:
+                flash(password_policy_error, "danger")
+                return redirect(url_for("password_reset_confirm", token=token))
+            user = _get_user(db_path, reset_email)
+            if user is None:
+                flash("This password reset link is no longer valid.", "danger")
+                return redirect(url_for("login"))
+            _update_user_password_hash_only(
+                db_path,
+                reset_email,
+                generate_password_hash(new_password),
+            )
+            _mark_password_reset_used(db_path, token)
+            flash("Password reset complete. Sign in with your new password.", "success")
+            return redirect(url_for("login"))
+        return _render_page("reset_password", "Reset Password", reset_email=reset_email)
 
     @app.get("/logout")
     def logout():

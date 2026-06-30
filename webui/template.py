@@ -854,6 +854,50 @@ PAGE_TEMPLATE = """
               </div>
               <button class="btn btn-primary w-100" type="submit">Sign in</button>
             </form>
+            {% if password_reset_enabled %}
+            <div class="mt-3 text-center">
+              <a href="{{ url_for('forgot_password') }}">Forgot your password?</a>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    {% elif page == "forgot_password" %}
+      <div class="row justify-content-center mt-4">
+        <div class="col-12 col-sm-10 col-md-7 col-lg-5">
+          <div class="card card-soft p-4">
+            <h1 class="h4 mb-2">Reset Password</h1>
+            <p class="text-secondary">Enter your account email and we will send a one-time reset link if the account exists.</p>
+            <form method="post" action="{{ url_for('forgot_password') }}">
+              <div class="mb-3">
+                <label class="form-label" for="forgot_email">Email</label>
+                <input class="form-control" id="forgot_email" name="email" type="email" required autocomplete="email" autocapitalize="none" spellcheck="false">
+              </div>
+              <button class="btn btn-primary w-100" type="submit">Send Reset Link</button>
+            </form>
+            <div class="mt-3 text-center">
+              <a href="{{ url_for('login') }}">Back to login</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    {% elif page == "reset_password" %}
+      <div class="row justify-content-center mt-4">
+        <div class="col-12 col-sm-10 col-md-7 col-lg-5">
+          <div class="card card-soft p-4">
+            <h1 class="h4 mb-2">Choose a New Password</h1>
+            <p class="text-secondary">Resetting password for <strong>{{ reset_email }}</strong>.</p>
+            <form method="post" action="{{ url_for('password_reset_confirm', token=request.view_args.token) }}">
+              <div class="mb-3">
+                <label class="form-label" for="reset_new_password">New Password</label>
+                <input class="form-control" id="reset_new_password" name="new_password" type="password" required autocomplete="new-password">
+              </div>
+              <div class="mb-3">
+                <label class="form-label" for="reset_confirm_new_password">Confirm New Password</label>
+                <input class="form-control" id="reset_confirm_new_password" name="confirm_new_password" type="password" required autocomplete="new-password">
+              </div>
+              <button class="btn btn-primary w-100" type="submit">Reset Password</button>
+            </form>
           </div>
         </div>
       </div>
@@ -941,29 +985,153 @@ PAGE_TEMPLATE = """
         </div>
       </div>
     {% elif page == "home" %}
-      <div class="card card-soft p-3 mb-3">
-        <h1 class="h5 mb-2">Control Center</h1>
-        <p class="text-secondary mb-0">Use the Menu in the top-right corner to navigate. This landing page stays minimal for mobile.</p>
-      </div>
-      <div class="row g-3">
-        <div class="col-12 col-md-4">
-          <div class="card card-soft p-3 h-100">
-            <p class="text-secondary small mb-1">Bot</p>
-            <p class="mb-0 fw-semibold">{{ snapshot.bot_name }}</p>
+      <div class="dashboard-shell">
+        <section class="dashboard-hero">
+          <div class="card card-soft dashboard-hero-main">
+            <div>
+              <h2>Control Center</h2>
+              <p class="dashboard-hero-lead">Operational control for <strong>{{ selected_guild_name or snapshot.guild_id }}</strong>. The sections below keep guild controls, community tools, feeds, and runtime actions grouped so the most-used pages stay easy to reach on desktop, tablet, and mobile.</p>
+            </div>
+            <div class="dashboard-pill-row">
+              <div class="dashboard-pill">
+                <strong>Bot</strong>
+                <span>{{ snapshot.bot_name }}</span>
+              </div>
+              <div class="dashboard-pill">
+                <strong>Server</strong>
+                <span>{{ selected_guild_name or snapshot.guild_id }}</span>
+              </div>
+              <div class="dashboard-pill">
+                <strong>Access</strong>
+                <span>{{ "Admin" if session.get("is_admin") else ("Guild Admin" if session.get("is_guild_admin") else "Read-only") }}</span>
+              </div>
+              <div class="dashboard-pill">
+                <strong>Latency</strong>
+                <span>{{ snapshot.latency_ms }} ms</span>
+              </div>
+            </div>
+            <p class="dashboard-note">Actions: {{ counts.total }} total ({{ counts.success }} success, {{ counts.failed }} failed) | Commands synced: {{ snapshot.commands_synced }}</p>
           </div>
-        </div>
-        <div class="col-12 col-md-4">
-          <div class="card card-soft p-3 h-100">
-            <p class="text-secondary small mb-1">Selected Guild</p>
-            <p class="mb-0 fw-semibold">{{ selected_guild_name or snapshot.guild_id }}</p>
+          <div class="card card-soft dashboard-hero-side">
+            <div>
+              <h3>Quick Notes</h3>
+              <p class="text-secondary">This layout follows the newer GL.iNet-style grouping: fewer dead ends, faster jumps, cleaner mobile navigation.</p>
+            </div>
+            <div class="dashboard-list">
+              <div class="dashboard-list-item">
+                <strong>Spicy Prompts</strong>
+                <div class="text-secondary">
+                  {% if spicy_status and spicy_status.ok %}
+                  {{ "Enabled" if spicy_status.enabled else "Disabled" }}
+                  {% else %}
+                  Status unavailable
+                  {% endif %}
+                </div>
+              </div>
+              <div class="dashboard-list-item">
+                <strong>Command Coverage</strong>
+                <div class="text-secondary">{{ command_statuses | selectattr("enabled") | list | length }}/{{ command_statuses | length }} enabled</div>
+              </div>
+              <div class="dashboard-list-item">
+                <strong>Invite</strong>
+                <div class="text-secondary">{% if snapshot.invite_url %}<a href="{{ snapshot.invite_url }}" target="_blank" rel="noreferrer">Add the bot to another server</a>{% else %}Invite link unavailable{% endif %}</div>
+              </div>
+            </div>
           </div>
-        </div>
-        <div class="col-12 col-md-4">
-          <div class="card card-soft p-3 h-100">
-            <p class="text-secondary small mb-1">Latency</p>
-            <p class="mb-0 fw-semibold">{{ snapshot.latency_ms }} ms</p>
+        </section>
+
+        <section class="card card-soft dashboard-section">
+          <div class="dashboard-section-head">
+            <div>
+              <h3>Core Controls</h3>
+              <p>Primary configuration pages for the selected guild.</p>
+            </div>
           </div>
-        </div>
+          <div class="dashboard-section-grid">
+            <div class="card dash-card primary">
+              <h3>Guild Settings</h3>
+              <p class="text-secondary">Configure guild-specific bot log channels and runtime options.</p>
+              <div class="dash-actions"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('guild_settings') }}">Open Guild Settings</a></div>
+            </div>
+            <div class="card dash-card">
+              <h3>Command Permissions</h3>
+              <p class="text-secondary">Control which commands are enabled and who can use them.</p>
+              <div class="dash-actions"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('command_permissions') }}">Open Permissions</a></div>
+            </div>
+            <div class="card dash-card">
+              <h3>Bot Profile</h3>
+              <p class="text-secondary">Update the bot display name, nickname, and avatar.</p>
+              <div class="dash-actions"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('bot_profile') }}">Open Bot Profile</a></div>
+            </div>
+            <div class="card dash-card">
+              <h3>Servers</h3>
+              <p class="text-secondary">Switch guild context and review managed server status.</p>
+              <div class="dash-actions"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('guilds_page') }}">Open Servers</a></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card card-soft dashboard-section">
+          <div class="dashboard-section-head">
+            <div>
+              <h3>Community Tools</h3>
+              <p>Moderation, activity, and member-facing utilities.</p>
+            </div>
+          </div>
+          <div class="dashboard-section-grid">
+            <div class="card dash-card">
+              <h3>Moderation</h3>
+              <p class="text-secondary">Warnings, bad-word controls, actions, and member management.</p>
+              <div class="dash-actions"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('moderation') }}">Open Moderation</a></div>
+            </div>
+            <div class="card dash-card">
+              <h3>Member Activity</h3>
+              <p class="text-secondary">Track active members and review guild engagement.</p>
+              <div class="dash-actions"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('member_activity_page') }}">Open Activity</a></div>
+            </div>
+            <div class="card dash-card">
+              <h3>Random User</h3>
+              <p class="text-secondary">Manage and trigger fair random member selection flows.</p>
+              <div class="dash-actions"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('random_user_page') }}">Open Random User</a></div>
+            </div>
+            <div class="card dash-card">
+              <h3>Tag Responses</h3>
+              <p class="text-secondary">Maintain guild response shortcuts and canned answers.</p>
+              <div class="dash-actions"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('tag_responses') }}">Manage Tags</a></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card card-soft dashboard-section">
+          <div class="dashboard-section-head">
+            <div>
+              <h3>Feeds And Monitoring</h3>
+              <p>External feeds, uptime checks, and automation pages.</p>
+            </div>
+          </div>
+          <div class="dashboard-section-grid">
+            <div class="card dash-card">
+              <h3>YouTube</h3>
+              <p class="text-secondary">Video and community-post monitoring.</p>
+              <div class="dash-actions"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('youtube_subscriptions') }}">Open YouTube</a></div>
+            </div>
+            <div class="card dash-card">
+              <h3>Reddit</h3>
+              <p class="text-secondary">Subreddit watchlists and notifications.</p>
+              <div class="dash-actions"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('reddit_feeds') }}">Open Reddit</a></div>
+            </div>
+            <div class="card dash-card">
+              <h3>WordPress</h3>
+              <p class="text-secondary">Blog and site-post monitoring.</p>
+              <div class="dash-actions"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('wordpress_feeds') }}">Open WordPress</a></div>
+            </div>
+            <div class="card dash-card">
+              <h3>Uptime Monitors</h3>
+              <p class="text-secondary">Per-guild service and site monitoring.</p>
+              <div class="dash-actions"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('uptime_monitors_page') }}">Open Monitors</a></div>
+            </div>
+          </div>
+        </section>
       </div>
     {% elif page == "overview" %}
       <div class="dashboard-shell">

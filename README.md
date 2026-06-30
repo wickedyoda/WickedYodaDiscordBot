@@ -60,6 +60,15 @@ Set these in `env.env`:
 - `WEB_ADMIN_DEFAULT_PASSWORD` - web admin login password
 - `WEB_ADMIN_DEFAULT_PASSWORD_HASH` - optional password hash instead of plaintext password
 - `WEB_ADMIN_SESSION_SECRET` - session signing secret for Flask
+- `WEB_PASSWORD_RESET_ENABLED` - enable email-based password reset from the login page
+- `WEB_PUBLIC_BASE_URL` - public base URL used in password reset emails (example: `https://bot.example.com`)
+- `WEB_SMTP_HOST` - SMTP server hostname for password reset emails
+- `WEB_SMTP_PORT` - SMTP server port (`587` for STARTTLS, `465` for SSL, `25` for plain SMTP)
+- `WEB_SMTP_USERNAME` - optional SMTP username
+- `WEB_SMTP_PASSWORD` - optional SMTP password
+- `WEB_SMTP_FROM_EMAIL` - from-address used for password reset emails
+- `WEB_SMTP_FROM_NAME` - display name used for password reset emails
+- `WEB_SMTP_SECURITY` - SMTP security mode (`none`, `starttls`, `ssl`)
 - `WEB_SESSION_COOKIE_SECURE` - set `true` when using HTTPS
 - `WEB_SESSION_COOKIE_SAMESITE` - cookie same-site policy (`Lax`, `Strict`, `None`)
 - `WEB_SESSION_TIMEOUT_MINUTES` - web session timeout (minutes)
