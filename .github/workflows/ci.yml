@@ -33,7 +33,7 @@ jobs:
           pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Compile check
-        run: python -m py_compile bot.py web_admin.py
+        run: python -m py_compile bot.py webui/app.py web_admin.py
 
       - name: Ruff lint
         run: ruff check .

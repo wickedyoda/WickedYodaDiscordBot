@@ -26,6 +26,7 @@ from defusedxml import ElementTree as DefusedET
 from discord import app_commands
 from discord.ext import commands
 
+from app.web_time import parse_iso_datetime_utc
 from core.bot_constants import (
     COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR,
     COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC,
@@ -64,7 +65,6 @@ from core.web_moderation import (
     validate_moderation_target,
 )
 from webui import start_web_admin
-from app.web_time import parse_iso_datetime_utc
 
 logging.basicConfig(
     level=logging.INFO,
@@ -553,19 +553,7 @@ def normalize_activity_timestamp(raw_value: datetime | None = None) -> datetime:
     return datetime.now(UTC)
 
 
-def parse_iso_datetime_utc(raw_value: str | datetime | None) -> datetime | None:
-    if isinstance(raw_value, datetime):
-        return normalize_activity_timestamp(raw_value)
-    candidate = str(raw_value or "").strip()
-    if not candidate:
-        return None
-    if candidate.endswith("Z"):
-        candidate = f"{candidate[:-1]}+00:00"
-    try:
-        parsed = datetime.fromisoformat(candidate)
-    except ValueError:
-        return None
-    return normalize_activity_timestamp(parsed)
+# parse_iso_datetime_utc is provided by app.web_time; reused below for backfill/runtime parsing.
 
 
 def parse_member_activity_backfill_since(raw_value: str) -> datetime | None:
@@ -5099,6 +5087,38 @@ def run_web_request_restart(actor_email: str) -> dict:
     timer.daemon = True
     timer.start()
     return {"ok": True, "message": "Restart requested. Container should restart shortly."}
+
+
+def run_web_get_honeypot(guild_id: int) -> dict:
+    return {"ok": False, "error": "Honeypot callback is not configured."}
+
+
+def run_web_manage_honeypot(payload: dict, actor_email: str, guild_id: int) -> dict:
+    return {"ok": False, "error": "Honeypot callback is not configured."}
+
+
+def run_web_get_role_access_mappings(guild_id: int) -> dict:
+    return {"ok": False, "error": "Role access callback is not configured."}
+
+
+def run_web_manage_role_access_mappings(payload: dict, actor_email: str, guild_id: int) -> dict:
+    return {"ok": False, "error": "Role access callback is not configured."}
+
+
+def run_web_get_reaction_roles(guild_id: int) -> dict:
+    return {"ok": False, "error": "Reaction roles callback is not configured."}
+
+
+def run_web_manage_reaction_roles(payload: dict, actor_email: str, guild_id: int) -> dict:
+    return {"ok": False, "error": "Reaction roles callback is not configured."}
+
+
+def run_web_get_discourse_settings(guild_id: int) -> dict:
+    return {"ok": False, "error": "Discourse callback is not configured."}
+
+
+def run_web_manage_discourse_settings(payload: dict, actor_email: str, guild_id: int) -> dict:
+    return {"ok": False, "error": "Discourse callback is not configured."}
 
 
 async def _ensure_color_roles(guild_id: int, names: list[str]) -> list[int]:
