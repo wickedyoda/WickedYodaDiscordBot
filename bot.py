@@ -64,6 +64,7 @@ from core.web_moderation import (
     validate_moderation_target,
 )
 from webui import start_web_admin
+from app.web_time import parse_iso_datetime_utc
 
 logging.basicConfig(
     level=logging.INFO,
@@ -5181,6 +5182,14 @@ class ModerationBot(commands.Bot):
                 resolve_youtube_community_seed=lambda source_url: resolve_youtube_community_seed(source_url),
                 resolve_wordpress_feed=lambda source_url: resolve_wordpress_feed_seed(source_url),
                 resolve_linkedin_feed=lambda source_url: resolve_linkedin_feed_seed(source_url),
+                get_honeypot=run_web_get_honeypot,
+                manage_honeypot=run_web_manage_honeypot,
+                get_role_access=run_web_get_role_access_mappings,
+                manage_role_access=run_web_manage_role_access_mappings,
+                get_reaction_roles=run_web_get_reaction_roles,
+                manage_reaction_roles=run_web_manage_reaction_roles,
+                get_discourse=run_web_get_discourse_settings,
+                manage_discourse=run_web_manage_discourse_settings,
                 host=WEB_BIND_HOST,
                 port=WEB_PORT,
             )

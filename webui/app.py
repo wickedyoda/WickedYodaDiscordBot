@@ -1816,7 +1816,7 @@ def create_app(
     get_tag_responses: Callable[[int], dict] | Callable[[], dict] | None = None,
     save_tag_responses: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     get_guild_settings: Callable[[int], dict] | None = None,
-    save_guild_settings: Callable[[dict, str, int], dict] | None = None,
+    save_guild_settings: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     get_bot_profile: Callable[[int], dict] | Callable[[], dict] | None = None,
     update_bot_profile: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     update_bot_avatar: Callable[[bytes, str, str, int], dict] | Callable[[bytes, str, str], dict] | None = None,
@@ -1836,6 +1836,14 @@ def create_app(
     resolve_youtube_community_seed: Callable[[str], dict] | None = None,
     resolve_wordpress_feed: Callable[[str], dict] | None = None,
     resolve_linkedin_feed: Callable[[str], dict] | None = None,
+    get_honeypot: Callable[[int], dict] | None = None,
+    manage_honeypot: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_role_access: Callable[[int], dict] | None = None,
+    manage_role_access: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_reaction_roles: Callable[[int], dict] | None = None,
+    manage_reaction_roles: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_discourse: Callable[[int], dict] | None = None,
+    manage_discourse: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
 ) -> Flask:
     app = Flask(__name__)
     _ensure_users_table(db_path)
@@ -2235,7 +2243,10 @@ def create_app(
     def _call_save_guild_settings(payload: dict, actor: str, guild_id: int | None) -> dict:
         if guild_id is None or not callable(save_guild_settings):
             return {"ok": False, "error": "Guild settings save callback is not configured."}
-        return save_guild_settings(payload, actor, guild_id)
+        try:
+            return save_guild_settings(payload, actor, guild_id)
+        except TypeError:
+            return save_guild_settings(payload, actor)
 
     def _call_get_bot_profile(guild_id: int | None) -> dict:
         if not callable(get_bot_profile):
@@ -2336,6 +2347,103 @@ def create_app(
         if not callable(request_restart):
             return {"ok": False, "error": "Restart callback is not configured."}
         return request_restart(actor)
+
+    def _call_honeypot_get(guild_id: int | None) -> dict:
+        if guild_id is None or not callable(get_honeypot):
+            return {"ok": False, "error": "Honeypot callback is not configured."}
+        return get_honeypot(guild_id)
+
+    def _build_honeypot_form_payload(form) -> dict:
+        return {
+            "action": str(form.get("action") or "").strip(),
+            "channel_id": str(form.get("channel_id") or "").strip(),
+            "honeypot_action": str(form.get("honeypot_action") or "").strip(),
+            "delete_message_days": str(form.get("delete_message_days") or "").strip(),
+            "timeout_hours": str(form.get("timeout_hours") or "").strip(),
+            "role_id": str(form.get("role_id") or "").strip(),
+            "enabled": str(form.get("enabled") or "1").strip(),
+            "log_channel_id": str(form.get("log_channel_id") or "").strip(),
+            "log_role_id": str(form.get("log_role_id") or "").strip(),
+            "join_guard_enabled": str(form.get("join_guard_enabled") or "0").strip(),
+            "join_guard_action": str(form.get("join_guard_action") or "").strip(),
+            "join_guard_min_account_age_hours": str(form.get("join_guard_min_account_age_hours") or "").strip(),
+            "join_guard_delete_message_days": str(form.get("join_guard_delete_message_days") or "").strip(),
+            "join_guard_timeout_hours": str(form.get("join_guard_timeout_hours") or "").strip(),
+            "join_guard_role_id": str(form.get("join_guard_role_id") or "").strip(),
+            "confirm": str(form.get("confirm") or "").strip(),
+        }
+
+    def _call_manage_honeypot(payload: dict, actor: str, guild_id: int | None) -> dict:
+        if guild_id is None or not callable(manage_honeypot):
+            return {"ok": False, "error": "Honeypot manage callback is not configured."}
+        try:
+            return manage_honeypot(payload, actor, guild_id)
+        except TypeError:
+            return manage_honeypot(payload, actor)
+
+    def _call_role_access_get(guild_id: int | None) -> dict:
+        if guild_id is None or not callable(get_role_access):
+            return {"ok": False, "error": "Role access callback is not configured."}
+        return get_role_access(guild_id)
+
+    def _build_role_access_form_payload(form) -> dict:
+        return {
+            "mappings_json": str(form.get("mappings_json") or "").strip(),
+        }
+
+    def _call_manage_role_access(payload: dict, actor: str, guild_id: int | None) -> dict:
+        if guild_id is None or not callable(manage_role_access):
+            return {"ok": False, "error": "Role access manage callback is not configured."}
+        try:
+            return manage_role_access(payload, actor, guild_id)
+        except TypeError:
+            return manage_role_access(payload, actor)
+
+    def _call_reaction_roles_get(guild_id: int | None) -> dict:
+        if guild_id is None or not callable(get_reaction_roles):
+            return {"ok": False, "error": "Reaction roles callback is not configured."}
+        return get_reaction_roles(guild_id)
+
+    def _build_reaction_roles_form_payload(form) -> dict:
+        return {
+            "command_id": str(form.get("command_id") or "").strip(),
+            "message_id": str(form.get("message_id") or "").strip(),
+            "emoji_key": str(form.get("emoji_key") or "").strip(),
+            "emoji_text": str(form.get("emoji_text") or "").strip(),
+            "role_id": str(form.get("role_id") or "").strip(),
+            "status": str(form.get("status") or "active").strip(),
+        }
+
+    def _call_manage_reaction_roles(payload: dict, actor: str, guild_id: int | None) -> dict:
+        if guild_id is None or not callable(manage_reaction_roles):
+            return {"ok": False, "error": "Reaction roles manage callback is not configured."}
+        try:
+            return manage_reaction_roles(payload, actor, guild_id)
+        except TypeError:
+            return manage_reaction_roles(payload, actor)
+
+    def _call_discourse_get(guild_id: int | None) -> dict:
+        if guild_id is None or not callable(get_discourse):
+            return {"ok": False, "error": "Discourse callback is not configured."}
+        return get_discourse(guild_id)
+
+    def _build_discourse_form_payload(form) -> dict:
+        return {
+            "base_url": str(form.get("base_url") or "").strip(),
+            "api_key": str(form.get("api_key") or "").strip(),
+            "api_username": str(form.get("api_username") or "").strip(),
+            "profile_name": str(form.get("profile_name") or "").strip(),
+            "request_timeout_seconds": str(form.get("request_timeout_seconds") or "15").strip(),
+            "enabled": str(form.get("enabled") or "0").strip(),
+        }
+
+    def _call_manage_discourse(payload: dict, actor: str, guild_id: int | None) -> dict:
+        if guild_id is None or not callable(manage_discourse):
+            return {"ok": False, "error": "Discourse manage callback is not configured."}
+        try:
+            return manage_discourse(payload, actor, guild_id)
+        except TypeError:
+            return manage_discourse(payload, actor)
 
     def _call_leave_guild(actor: str, guild_id: int | None) -> dict:
         if guild_id is None or not callable(leave_guild):
@@ -4695,6 +4803,26 @@ def create_app(
 
         return _render_page("account", "Web Admin Account", account_user=user)
 
+    @app.get("/admin/honeypot")
+    @login_required
+    def honeypot():
+        return _render_page("honeypot", "Honeypot & Join Guard")
+
+    @app.get("/admin/role-access")
+    @login_required
+    def role_access():
+        return _render_page("role_access", "Role Access")
+
+    @app.get("/admin/reaction-roles")
+    @login_required
+    def reaction_roles():
+        return _render_page("reaction_roles", "Reaction Roles")
+
+    @app.get("/admin/discourse")
+    @login_required
+    def discourse():
+        return _render_page("discourse", "Discourse")
+
     @app.get("/admin/settings")
     @login_required
     def settings():
@@ -4751,6 +4879,98 @@ def create_app(
         flash("Settings saved to env file. Restart container to apply runtime changes.", "success")
         return redirect(url_for("settings"))
 
+    @app.get("/admin/honeypot")
+    @login_required
+    def honeypot_page():
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _call_get_honeypot(selected_guild_id)
+        if not isinstance(payload, dict):
+            payload = {"ok": False, "error": "Honeypot data is unavailable."}
+        return _render_page("honeypot", "Honeypot", honeypot=payload)
+
+    @app.post("/admin/honeypot/save")
+    @login_required
+    def honeypot_save():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("honeypot")
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _build_honeypot_form_payload(request.form)
+        result = _call_manage_honeypot(payload, str(session.get("user", "")), selected_guild_id)
+        if not isinstance(result, dict) or not result.get("ok"):
+            flash(str(result.get("error")) if isinstance(result, dict) else "Failed to save honeypot settings.", "danger")
+        else:
+            flash("Honeypot settings updated.", "success")
+        return redirect(url_for("honeypot_page"))
+
+    @app.get("/admin/role-access")
+    @login_required
+    def role_access_page():
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _call_get_role_access(selected_guild_id)
+        if not isinstance(payload, dict):
+            payload = {"ok": False, "error": "Role access data is unavailable."}
+        return _render_page("role_access", "Role Access", role_access=payload)
+
+    @app.post("/admin/role-access/save")
+    @login_required
+    def role_access_save():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("role_access")
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _build_role_access_form_payload(request.form)
+        result = _call_manage_role_access(payload, str(session.get("user", "")), selected_guild_id)
+        if not isinstance(result, dict) or not result.get("ok"):
+            flash(str(result.get("error")) if isinstance(result, dict) else "Failed to save role access settings.", "danger")
+        else:
+            flash("Role access settings updated.", "success")
+        return redirect(url_for("role_access_page"))
+
+    @app.get("/admin/reaction-roles")
+    @login_required
+    def reaction_roles_page():
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _call_get_reaction_roles(selected_guild_id)
+        if not isinstance(payload, dict):
+            payload = {"ok": False, "error": "Reaction roles data is unavailable."}
+        return _render_page("reaction_roles", "Reaction Roles", reaction_roles=payload)
+
+    @app.post("/admin/reaction-roles/save")
+    @login_required
+    def reaction_roles_save():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("reaction_roles")
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _build_reaction_roles_form_payload(request.form)
+        result = _call_manage_reaction_roles(payload, str(session.get("user", "")), selected_guild_id)
+        if not isinstance(result, dict) or not result.get("ok"):
+            flash(str(result.get("error")) if isinstance(result, dict) else "Failed to save reaction roles.", "danger")
+        else:
+            flash("Reaction roles updated.", "success")
+        return redirect(url_for("reaction_roles_page"))
+
+    @app.get("/admin/discourse")
+    @login_required
+    def discourse_page():
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _call_get_discourse(selected_guild_id)
+        if not isinstance(payload, dict):
+            payload = {"ok": False, "error": "Discourse settings are unavailable."}
+        return _render_page("discourse", "Discourse", discourse=payload)
+
+    @app.post("/admin/discourse/save")
+    @login_required
+    def discourse_save():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("discourse")
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _build_discourse_form_payload(request.form)
+        result = _call_manage_discourse(payload, str(session.get("user", "")), selected_guild_id)
+        if not isinstance(result, dict) or not result.get("ok"):
+            flash(str(result.get("error")) if isinstance(result, dict) else "Failed to save discourse settings.", "danger")
+        else:
+            flash("Discourse settings updated.", "success")
+        return redirect(url_for("discourse_page"))
+
     return app
 
 
@@ -4765,7 +4985,7 @@ def start_web_admin(
     get_tag_responses: Callable[[int], dict] | Callable[[], dict] | None = None,
     save_tag_responses: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     get_guild_settings: Callable[[int], dict] | None = None,
-    save_guild_settings: Callable[[dict, str, int], dict] | None = None,
+    save_guild_settings: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     get_bot_profile: Callable[[int], dict] | Callable[[], dict] | None = None,
     update_bot_profile: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     update_bot_avatar: Callable[[bytes, str, str, int], dict] | Callable[[bytes, str, str], dict] | None = None,
@@ -4785,6 +5005,14 @@ def start_web_admin(
     resolve_youtube_community_seed: Callable[[str], dict] | None = None,
     resolve_wordpress_feed: Callable[[str], dict] | None = None,
     resolve_linkedin_feed: Callable[[str], dict] | None = None,
+    get_honeypot: Callable[[int], dict] | None = None,
+    manage_honeypot: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_role_access: Callable[[int], dict] | None = None,
+    manage_role_access: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_reaction_roles: Callable[[int], dict] | None = None,
+    manage_reaction_roles: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_discourse: Callable[[int], dict] | None = None,
+    manage_discourse: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     host: str = "127.0.0.1",
     port: int = 8081,
     ssl_context: str | tuple[str, str] | None = None,
@@ -4820,6 +5048,14 @@ def start_web_admin(
         resolve_youtube_community_seed=resolve_youtube_community_seed,
         resolve_wordpress_feed=resolve_wordpress_feed,
         resolve_linkedin_feed=resolve_linkedin_feed,
+        get_honeypot=get_honeypot,
+        manage_honeypot=manage_honeypot,
+        get_role_access=get_role_access,
+        manage_role_access=manage_role_access,
+        get_reaction_roles=get_reaction_roles,
+        manage_reaction_roles=manage_reaction_roles,
+        get_discourse=get_discourse,
+        manage_discourse=manage_discourse,
     )
 
     def run() -> None:
