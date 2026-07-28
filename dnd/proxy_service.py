@@ -22,7 +22,7 @@ def create_proxy(db_path: str, guild_id: int, owner_id: int, name: str, template
             (guild_id, owner_id, name, template, thumbnail_url, avatar_url, description, now, now),
         )
         conn.commit()
-    row = conn.execute("SELECT * FROM dnd_proxies WHERE guild_id=? AND owner_id=? AND name=?", (guild_id, owner_id, name)).fetchone()
+    row = _get_conn(db_path).execute("SELECT * FROM dnd_proxies WHERE guild_id=? AND owner_id=? AND name=?", (guild_id, owner_id, name)).fetchone()
     return dict(row)
 
 
@@ -63,4 +63,3 @@ def add_proxy_identity(db_path: str, guild_id: int, owner_id: int, name: str, di
         return existing
     template = "{name}: {content}"
     return create_proxy(db_path, int(guild_id), int(owner_id), name, template=template, avatar_url=avatar_url)
-
