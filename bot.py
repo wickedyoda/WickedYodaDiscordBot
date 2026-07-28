@@ -26,7 +26,6 @@ from defusedxml import ElementTree as DefusedET
 from discord import app_commands
 from discord.ext import commands
 
-from app.web_time import parse_iso_datetime_utc
 from core.bot_constants import (
     COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR,
     COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC,
@@ -64,9 +63,8 @@ from core.web_moderation import (
     validate_manageable_role,
     validate_moderation_target,
 )
-from webui import start_web_admin
-from app.web_time import parse_iso_datetime_utc
 from dnd.bot_integration import ensure_dnd_schema, register_dnd_commands
+from webui import start_web_admin
 
 logging.basicConfig(
     level=logging.INFO,
@@ -555,7 +553,19 @@ def normalize_activity_timestamp(raw_value: datetime | None = None) -> datetime:
     return datetime.now(UTC)
 
 
-# parse_iso_datetime_utc is provided by app.web_time; reused below for backfill/runtime parsing.
+def parse_iso_datetime_utc(raw_value: str | datetime | None) -> datetime | None:
+    if isinstance(raw_value, datetime):
+        return normalize_activity_timestamp(raw_value)
+    candidate = str(raw_value or "").strip()
+    if not candidate:
+        return None
+    if candidate.endswith("Z"):
+        candidate = f"{candidate[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+    return normalize_activity_timestamp(parsed)
 
 
 def parse_member_activity_backfill_since(raw_value: str) -> datetime | None:
