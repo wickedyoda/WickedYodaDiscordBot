@@ -148,12 +148,16 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 await reply_ephemeral(interaction, "Use `new` to start or `roll` to roll into the current tracker.")
 
     @dnd_group.command(name="character", description="Storage-backed character helpers.")
-    async def dice_character(interaction: Any, action: str = "find", splat: str | None = None, name: str | None = None) -> None:  # type: ignore[misc]
+    async def dice_character(interaction: Any, action: str = "find", splat: str | None = None, name: str | None = None, payload: str | None = None) -> None:  # type: ignore[misc]
         if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_character"):
             return
-        if action in {"find", "list", "delete"} and not hasattr(interaction, "guild"):
+        if action != "show" and not hasattr(interaction, "guild"):
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Guild context is required for character commands.")
+            return
+        if action == "save" and not name and not splat:
+            if reply_ephemeral:
+                await reply_ephemeral(interaction, "Provide a character name.")
             return
         if action == "find":
             target = name or (splat or "")
@@ -165,11 +169,65 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             if not result:
                 if reply_ephemeral:
                     await reply_ephemeral(interaction, "No matching character found.")
+                return
+            lines = [
+                f"Name: {result['name']}",
+                f"Splat: {result['splat']}",
+                f"Updated: {result['updated_at']}",
+            ]
+            data = result.get("data") or {}
+            if data:
+                lines.append("Data:")
+                lines.extend(f"- {k}: {v}" for k, v in data.items())
+            if reply_ephemeral:
+                await reply_ephemeral(interaction, "\n".join(lines))
             else:
+                await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        elif action == "show":
+            target = name or (splat or "")
+            if not target:
                 if reply_ephemeral:
-                    await reply_ephemeral(interaction, f"Found `{result['name']}` ({result['splat']}).")
-                else:
-                    await interaction.response.send_message(f"Found `{result['name']}` ({result['splat']}).", ephemeral=True)
+                    await reply_ephemeral(interaction, "Provide a character name.")
+                return
+            resolved = find_character(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), target)
+            if not resolved:
+                if reply_ephemeral:
+                    await reply_ephemeral(interaction, "No matching character found.")
+                return
+            data = resolved.get("data") or {}
+            title = f"{resolved['name']} ({resolved['splat']})"
+            description = "\n".join(f"**{k}**: {v}" for k, v in data.items()) if data else "No stored sheet data."
+            try:
+                await interaction.response.send_message(embed=discord.Embed(title=title, description=description))
+            except Exception:
+                await interaction.response.send_message(f"{title}\n{description}")
+        elif action == "sheet":
+            target = name or (splat or "")
+            if not target:
+                if reply_ephemeral:
+                    await reply_ephemeral(interaction, "Provide a character name.")
+                return
+            resolved = find_character(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), target)
+            if not resolved:
+                if reply_ephemeral:
+                    await reply_ephemeral(interaction, "No matching character found.")
+                return
+            character_data = resolved.get("data") or {}
+            guild_id = int(interaction.guild.id)
+            allowed_splats = [
+                row["allowed_splats"]
+                for row in _get_db_rows(DND_DB_PATH, "SELECT allowed_splats FROM dnd_chronicles WHERE guild_id=?", (guild_id,))
+            ]
+            allowed = _parse_json_list(allowed_splats[0] if allowed_splats else '["vampire20th"]')
+            fields = [f"**Sheet**: {resolved['name']}", f"**Splat**: {resolved['splat']}"]
+            if resolved["splat"] not in allowed:
+                fields.append("⚠ Splat not allowed in this chronicle.")
+            fields.extend(_sheet_fields_for_splat(resolved["splat"], resolved["name"], character_data))
+            message = "\n".join(fields)
+            if reply_ephemeral:
+                await reply_ephemeral(interaction, message)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
         elif action == "list":
             results = list_characters(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id))
             if not results:
@@ -181,6 +239,15 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                     await reply_ephemeral(interaction, lines)
                 else:
                     await interaction.response.send_message(lines, ephemeral=True)
+        elif action == "save":
+            target = name or (splat or "")
+            if not target:
+                if reply_ephemeral:
+                    await reply_ephemeral(interaction, "Provide a character name.")
+                return
+            data = {"raw": payload or ""}
+            save_character(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), splat or "", target, data)
+            await interaction.response.send_message(f"Saved character `{target}`.", ephemeral=True)
         elif action == "delete":
             target = name or (splat or "")
             if not target:
@@ -192,7 +259,7 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 await reply_ephemeral(interaction, "Character deleted." if deleted else "Character not found.")
         else:
             if reply_ephemeral:
-                await reply_ephemeral(interaction, "Character storage is ready; full editor commands are in progress.")
+                await reply_ephemeral(interaction, "Use `find`, `show`, `sheet`, `list`, `save`, or `delete`.")
 
     @dnd_group.command(name="proxy", description="Proxy identity helpers.")
     async def proxy_command(interaction: Any, action: str = "create", name: str = "", template: str = "{name}: {content}", avatar_url: str = "") -> None:  # type: ignore[misc]
@@ -381,3 +448,82 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         else:
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Use `create` or `status`.")
+
+
+def _get_db_rows(db_path: str, sql: str, params: tuple) -> List[dict]:
+    import sqlite3
+
+    conn = sqlite3.connect(db_path, timeout=10)
+    conn.row_factory = sqlite3.Row
+    with conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _parse_json_list(raw: str) -> List[str]:
+    import json
+
+    try:
+        data = json.loads(raw or "[]")
+    except Exception:
+        data = []
+    if isinstance(data, list):
+        return [str(item) for item in data]
+    return []
+
+
+def _sheet_fields_for_splat(splat: str, name: str, data: dict) -> List[str]:
+    if splat in {"vampire20th", "vampire"}:
+        return [
+            f"**{name}** - Vampire 20th",
+            f"- Generation: {data.get('generation', '?')}",
+            f"- Clan: {data.get('clan', '?')}",
+            f"- Blood Pool: {data.get('blood', '?')}",
+            f"- Embrace: {data.get('embrace', '?')}",
+            f"- Sire: {data.get('sire', '?')}",
+            f"- Path: {data.get('path', '?')}",
+        ]
+    if splat in {"werewolf", "garou"}:
+        return [
+            f"**{name}** - Werewolf",
+            f"- Tribe: {data.get('tribe', '?')}",
+            f"- Auspice: {data.get('auspice', '?')}",
+            f"- Breed: {data.get('breed', '?')}",
+            f"- Gnosis: {data.get('gnosis', '?')}",
+        ]
+    if splat in {"mage", "m20"}:
+        return [
+            f"**{name}** - Mage",
+            f"- Tradition: {data.get('tradition', '?')}",
+            f"- Essence: {data.get('essence', '?')}",
+            f"- Paradox: {data.get('paradox', '?')}",
+            f"- Spheres: {data.get('spheres', '?')}",
+        ]
+    if splat in {"demon", "demon20th"}:
+        return [
+            f"**{name}** - Demon",
+            f"- House: {data.get('house', '?')}",
+            f"- Species: {data.get('species', '?')}",
+            f"- Faith: {data.get('faith', '?')}",
+            f"- Torment: {data.get('torment', '?')}",
+        ]
+    if splat in {"changeling", "ctd"}:
+        return [
+            f"**{name}** - Changeling",
+            f"- Kith: {data.get('kith', '?')}",
+            f"- Seeming: {data.get('seeming', '?')}",
+            f"- House: {data.get('house', '?')}",
+            f"- Glamour: {data.get('glamour', '?')}",
+        ]
+    if splat in {"wraith", "wto"}:
+        return [
+            f"**{name}** - Wraith",
+            f"- Legion: {data.get('legion', '?')}",
+            f"- Guild: {data.get('guild', '?')}",
+            f"- Shadow: {data.get('shadow', '?')}",
+            f"- Pathos: {data.get('pathos', '?')}",
+        ]
+    fields = [f"**{name}**"]
+    if data:
+        fields.extend(f"- {k}: {v}" for k, v in data.items())
+    return fields
