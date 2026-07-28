@@ -120,6 +120,10 @@ WEB_TLS_PORT=8081
 - `/questionoftheday`
 - `/spicy`
 - `/countdown`
+- `/dnd roll`
+- `/dnd general`
+- `/dnd initiative`
+- `/dnd character`
 - `/birthday set`
 - `/birthday view`
 - `/birthday upcoming`

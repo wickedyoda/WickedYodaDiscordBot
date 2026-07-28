@@ -65,6 +65,8 @@ from core.web_moderation import (
     validate_moderation_target,
 )
 from webui import start_web_admin
+from app.web_time import parse_iso_datetime_utc
+from dnd.bot_integration import ensure_dnd_schema, register_dnd_commands
 
 logging.basicConfig(
     level=logging.INFO,
@@ -5189,6 +5191,7 @@ class ModerationBot(commands.Bot):
         self.commands_synced = synced_total
 
     async def setup_hook(self) -> None:
+        ensure_dnd_schema()
         if WEB_ENABLED and self.web_thread is None:
             self.web_thread = start_web_admin(
                 db_path=ACTION_DB_PATH,
@@ -5993,6 +5996,7 @@ class ModerationBot(commands.Bot):
 
 bot = ModerationBot()
 birthday_group = app_commands.Group(name="birthday", description="Birthday commands")
+dnd_group = app_commands.Group(name="dnd", description="D&D 20th helper commands")
 
 
 def record_action_safe(
@@ -7048,6 +7052,8 @@ async def birthday_remove(interaction: discord.Interaction) -> None:
 
 
 bot.tree.add_command(birthday_group)
+register_dnd_commands(bot)
+bot.tree.add_command(dnd_group)
 
 
 @bot.tree.command(name="shorten", description="Create a short URL.")
