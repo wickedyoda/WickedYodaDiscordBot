@@ -1,6 +1,12 @@
 # Multi-Guild and Env Setup
 
-Last Updated: 2026-03-28
+Last Updated: 2026-07-28
+
+## D&D 20th Persistent Schema
+
+- The bot auto-runs D&D SQLite schema setup at startup from the web/admin startup flow.
+- No new required env vars are required for D&D commands.
+- State is stored in SQLite and managed via `/dnd` slash commands.
 
 ## Required vs Optional Vars
 
