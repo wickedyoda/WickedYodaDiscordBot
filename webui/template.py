@@ -649,6 +649,10 @@ PAGE_TEMPLATE = """
                 <option value="{{ url_for('linkedin_feeds') }}">LinkedIn</option>
                 <option value="{{ url_for('uptime_monitors_page') }}">Uptime Monitors</option>
                 <option value="{{ url_for('status_page') }}">Status</option>
+                <option value="{{ url_for('honeypot') }}">Honeypot</option>
+                <option value="{{ url_for('role_access') }}">Role Access</option>
+                <option value="{{ url_for('reaction_roles') }}">Reaction Roles</option>
+                <option value="{{ url_for('discourse') }}">Discourse</option>
                 {% if session.get("is_admin") %}
                 <option value="{{ url_for('users') }}">Users</option>
                 <option value="{{ url_for('guild_access') }}">Guild Access</option>
@@ -749,6 +753,10 @@ PAGE_TEMPLATE = """
             <option value="{{ url_for('linkedin_feeds') }}">LinkedIn</option>
             <option value="{{ url_for('uptime_monitors_page') }}">Uptime Monitors</option>
             <option value="{{ url_for('status_page') }}">Status</option>
+            <option value="{{ url_for('honeypot') }}">Honeypot</option>
+            <option value="{{ url_for('role_access') }}">Role Access</option>
+            <option value="{{ url_for('reaction_roles') }}">Reaction Roles</option>
+            <option value="{{ url_for('discourse') }}">Discourse</option>
             {% if session.get("is_admin") %}
             <option value="{{ url_for('users') }}">Users</option>
             <option value="{{ url_for('guild_access') }}">Guild Access</option>
@@ -2689,6 +2697,26 @@ PAGE_TEMPLATE = """
             </tbody>
           </table>
         </div>
+      </div>
+    {% elif page == "honeypot" %}
+      <div class="card card-soft p-3">
+        <h1 class="h5 mb-3">Honeypot &amp; Join Guard</h1>
+        <p class="small text-secondary">Group monitoring, join-guard rules, and enforcement settings.</p>
+      </div>
+    {% elif page == "role_access" %}
+      <div class="card card-soft p-3">
+        <h1 class="h5 mb-3">Role Access</h1>
+        <p class="small text-secondary">Map roles, required roles, and access rules.</p>
+      </div>
+    {% elif page == "reaction_roles" %}
+      <div class="card card-soft p-3">
+        <h1 class="h5 mb-3">Reaction Roles</h1>
+        <p class="small text-secondary">Message reaction role assignments.</p>
+      </div>
+    {% elif page == "discourse" %}
+      <div class="card card-soft p-3">
+        <h1 class="h5 mb-3">Discourse</h1>
+        <p class="small text-secondary">Forum integration and sync settings.</p>
       </div>
     {% elif page == "observability" %}
       <div class="row g-3 mb-3">

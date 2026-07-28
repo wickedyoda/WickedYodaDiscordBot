@@ -332,9 +332,7 @@ def _ensure_youtube_subscriptions_table(db_path: str) -> None:
         for column, statement in migrations.items():
             if column not in columns:
                 conn.execute(statement)
-        conn.execute(
-            "UPDATE youtube_subscriptions SET poll_interval_seconds = 300 WHERE poll_interval_seconds IS NULL OR poll_interval_seconds <= 0"
-        )
+        conn.execute("UPDATE youtube_subscriptions SET poll_interval_seconds = 300 WHERE poll_interval_seconds IS NULL OR poll_interval_seconds <= 0")
         conn.commit()
 
 
@@ -1816,7 +1814,7 @@ def create_app(
     get_tag_responses: Callable[[int], dict] | Callable[[], dict] | None = None,
     save_tag_responses: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     get_guild_settings: Callable[[int], dict] | None = None,
-    save_guild_settings: Callable[[dict, str, int], dict] | None = None,
+    save_guild_settings: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     get_bot_profile: Callable[[int], dict] | Callable[[], dict] | None = None,
     update_bot_profile: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     update_bot_avatar: Callable[[bytes, str, str, int], dict] | Callable[[bytes, str, str], dict] | None = None,
@@ -1836,6 +1834,14 @@ def create_app(
     resolve_youtube_community_seed: Callable[[str], dict] | None = None,
     resolve_wordpress_feed: Callable[[str], dict] | None = None,
     resolve_linkedin_feed: Callable[[str], dict] | None = None,
+    get_honeypot: Callable[[int], dict] | None = None,
+    manage_honeypot: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_role_access: Callable[[int], dict] | None = None,
+    manage_role_access: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_reaction_roles: Callable[[int], dict] | None = None,
+    manage_reaction_roles: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_discourse: Callable[[int], dict] | None = None,
+    manage_discourse: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
 ) -> Flask:
     app = Flask(__name__)
     _ensure_users_table(db_path)
@@ -1924,9 +1930,7 @@ def create_app(
             password_changed_at=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
         )
     elif (
-        admin_password
-        and not generated_one_time_admin_password
-        and not check_password_hash(str(existing_admin_user.get("password_hash", "")), admin_password)
+        admin_password and not generated_one_time_admin_password and not check_password_hash(str(existing_admin_user.get("password_hash", "")), admin_password)
     ):
         _upsert_user(
             db_path,
@@ -2235,7 +2239,10 @@ def create_app(
     def _call_save_guild_settings(payload: dict, actor: str, guild_id: int | None) -> dict:
         if guild_id is None or not callable(save_guild_settings):
             return {"ok": False, "error": "Guild settings save callback is not configured."}
-        return save_guild_settings(payload, actor, guild_id)
+        try:
+            return save_guild_settings(payload, actor, guild_id)
+        except TypeError:
+            return save_guild_settings(payload, actor)
 
     def _call_get_bot_profile(guild_id: int | None) -> dict:
         if not callable(get_bot_profile):
@@ -2336,6 +2343,103 @@ def create_app(
         if not callable(request_restart):
             return {"ok": False, "error": "Restart callback is not configured."}
         return request_restart(actor)
+
+    def _call_honeypot_get(guild_id: int | None) -> dict:
+        if guild_id is None or not callable(get_honeypot):
+            return {"ok": False, "error": "Honeypot callback is not configured."}
+        return get_honeypot(guild_id)
+
+    def _build_honeypot_form_payload(form) -> dict:
+        return {
+            "action": str(form.get("action") or "").strip(),
+            "channel_id": str(form.get("channel_id") or "").strip(),
+            "honeypot_action": str(form.get("honeypot_action") or "").strip(),
+            "delete_message_days": str(form.get("delete_message_days") or "").strip(),
+            "timeout_hours": str(form.get("timeout_hours") or "").strip(),
+            "role_id": str(form.get("role_id") or "").strip(),
+            "enabled": str(form.get("enabled") or "1").strip(),
+            "log_channel_id": str(form.get("log_channel_id") or "").strip(),
+            "log_role_id": str(form.get("log_role_id") or "").strip(),
+            "join_guard_enabled": str(form.get("join_guard_enabled") or "0").strip(),
+            "join_guard_action": str(form.get("join_guard_action") or "").strip(),
+            "join_guard_min_account_age_hours": str(form.get("join_guard_min_account_age_hours") or "").strip(),
+            "join_guard_delete_message_days": str(form.get("join_guard_delete_message_days") or "").strip(),
+            "join_guard_timeout_hours": str(form.get("join_guard_timeout_hours") or "").strip(),
+            "join_guard_role_id": str(form.get("join_guard_role_id") or "").strip(),
+            "confirm": str(form.get("confirm") or "").strip(),
+        }
+
+    def _call_manage_honeypot(payload: dict, actor: str, guild_id: int | None) -> dict:
+        if guild_id is None or not callable(manage_honeypot):
+            return {"ok": False, "error": "Honeypot manage callback is not configured."}
+        try:
+            return manage_honeypot(payload, actor, guild_id)
+        except TypeError:
+            return manage_honeypot(payload, actor)
+
+    def _call_role_access_get(guild_id: int | None) -> dict:
+        if guild_id is None or not callable(get_role_access):
+            return {"ok": False, "error": "Role access callback is not configured."}
+        return get_role_access(guild_id)
+
+    def _build_role_access_form_payload(form) -> dict:
+        return {
+            "mappings_json": str(form.get("mappings_json") or "").strip(),
+        }
+
+    def _call_manage_role_access(payload: dict, actor: str, guild_id: int | None) -> dict:
+        if guild_id is None or not callable(manage_role_access):
+            return {"ok": False, "error": "Role access manage callback is not configured."}
+        try:
+            return manage_role_access(payload, actor, guild_id)
+        except TypeError:
+            return manage_role_access(payload, actor)
+
+    def _call_reaction_roles_get(guild_id: int | None) -> dict:
+        if guild_id is None or not callable(get_reaction_roles):
+            return {"ok": False, "error": "Reaction roles callback is not configured."}
+        return get_reaction_roles(guild_id)
+
+    def _build_reaction_roles_form_payload(form) -> dict:
+        return {
+            "command_id": str(form.get("command_id") or "").strip(),
+            "message_id": str(form.get("message_id") or "").strip(),
+            "emoji_key": str(form.get("emoji_key") or "").strip(),
+            "emoji_text": str(form.get("emoji_text") or "").strip(),
+            "role_id": str(form.get("role_id") or "").strip(),
+            "status": str(form.get("status") or "active").strip(),
+        }
+
+    def _call_manage_reaction_roles(payload: dict, actor: str, guild_id: int | None) -> dict:
+        if guild_id is None or not callable(manage_reaction_roles):
+            return {"ok": False, "error": "Reaction roles manage callback is not configured."}
+        try:
+            return manage_reaction_roles(payload, actor, guild_id)
+        except TypeError:
+            return manage_reaction_roles(payload, actor)
+
+    def _call_discourse_get(guild_id: int | None) -> dict:
+        if guild_id is None or not callable(get_discourse):
+            return {"ok": False, "error": "Discourse callback is not configured."}
+        return get_discourse(guild_id)
+
+    def _build_discourse_form_payload(form) -> dict:
+        return {
+            "base_url": str(form.get("base_url") or "").strip(),
+            "api_key": str(form.get("api_key") or "").strip(),
+            "api_username": str(form.get("api_username") or "").strip(),
+            "profile_name": str(form.get("profile_name") or "").strip(),
+            "request_timeout_seconds": str(form.get("request_timeout_seconds") or "15").strip(),
+            "enabled": str(form.get("enabled") or "0").strip(),
+        }
+
+    def _call_manage_discourse(payload: dict, actor: str, guild_id: int | None) -> dict:
+        if guild_id is None or not callable(manage_discourse):
+            return {"ok": False, "error": "Discourse manage callback is not configured."}
+        try:
+            return manage_discourse(payload, actor, guild_id)
+        except TypeError:
+            return manage_discourse(payload, actor)
 
     def _call_leave_guild(actor: str, guild_id: int | None) -> dict:
         if guild_id is None or not callable(leave_guild):
@@ -3137,9 +3241,7 @@ def create_app(
             status_checks=status_checks,
             status_log_name=status_log_path.name if status_log_path is not None else "n/a",
             status_log_dir=str(log_dir),
-            status_log_tail=_tail_file(status_log_path, line_limit=120)
-            if status_log_path is not None
-            else "No status log file configured.",
+            status_log_tail=_tail_file(status_log_path, line_limit=120) if status_log_path is not None else "No status log file configured.",
         )
 
     @app.get("/admin/uptime-monitors")
@@ -3238,16 +3340,10 @@ def create_app(
         observability_payload = {
             "sampled_at": str(snapshot.get("sampled_at", "")).replace("T", " ").replace("+00:00", ""),
             "uptime": _format_uptime(snapshot.get("uptime_seconds", 0)),
-            "process_cpu": f"{float(snapshot['process_cpu_percent']):.2f}%"
-            if isinstance(snapshot.get("process_cpu_percent"), (int, float))
-            else "n/a",
+            "process_cpu": f"{float(snapshot['process_cpu_percent']):.2f}%" if isinstance(snapshot.get("process_cpu_percent"), (int, float)) else "n/a",
             "rss": _format_bytes(snapshot.get("rss_bytes")),
-            "io_read": f"{_format_bytes(snapshot.get('io_read_rate_bps'))}/s"
-            if isinstance(snapshot.get("io_read_rate_bps"), (int, float))
-            else "n/a",
-            "io_write": f"{_format_bytes(snapshot.get('io_write_rate_bps'))}/s"
-            if isinstance(snapshot.get("io_write_rate_bps"), (int, float))
-            else "n/a",
+            "io_read": f"{_format_bytes(snapshot.get('io_read_rate_bps'))}/s" if isinstance(snapshot.get("io_read_rate_bps"), (int, float)) else "n/a",
+            "io_write": f"{_format_bytes(snapshot.get('io_write_rate_bps'))}/s" if isinstance(snapshot.get("io_write_rate_bps"), (int, float)) else "n/a",
         }
         rows = _build_observability_rows(snapshot)
         return _render_page(
@@ -3279,9 +3375,7 @@ def create_app(
                     flash(str(result.get("message", "Bot profile updated.")), "success")
                 else:
                     flash(
-                        str(result.get("error", "Failed to update bot profile."))
-                        if isinstance(result, dict)
-                        else "Failed to update bot profile.",
+                        str(result.get("error", "Failed to update bot profile.")) if isinstance(result, dict) else "Failed to update bot profile.",
                         "danger",
                     )
             elif action == "avatar":
@@ -3313,9 +3407,7 @@ def create_app(
                             flash(str(result.get("message", "Bot avatar updated.")), "success")
                         else:
                             flash(
-                                str(result.get("error", "Failed to update bot avatar."))
-                                if isinstance(result, dict)
-                                else "Failed to update bot avatar.",
+                                str(result.get("error", "Failed to update bot avatar.")) if isinstance(result, dict) else "Failed to update bot avatar.",
                                 "danger",
                             )
             else:
@@ -3480,9 +3572,7 @@ def create_app(
             result = _call_pick_random_user(selected_guild_id, role_id_value)
             if not isinstance(result, dict) or not result.get("ok"):
                 flash(
-                    str(result.get("error") or "Failed to pick a random user.")
-                    if isinstance(result, dict)
-                    else "Failed to pick a random user.",
+                    str(result.get("error") or "Failed to pick a random user.") if isinstance(result, dict) else "Failed to pick a random user.",
                     "danger",
                 )
         return _render_page(
@@ -3539,9 +3629,7 @@ def create_app(
         payload = _call_export_member_activity(selected_guild_id, selected_role_id)
         if not isinstance(payload, dict) or not payload.get("ok"):
             flash(
-                str(payload.get("error") or "Failed to export member activity.")
-                if isinstance(payload, dict)
-                else "Failed to export member activity.",
+                str(payload.get("error") or "Failed to export member activity.") if isinstance(payload, dict) else "Failed to export member activity.",
                 "danger",
             )
             return redirect(url_for("member_activity_page"))
@@ -4216,9 +4304,7 @@ def create_app(
                     raise ValueError("Tag response JSON must be an object.")
                 result = _call_save_tag_responses(payload, str(session.get("user", "")), selected_guild_id)
                 if not isinstance(result, dict) or not result.get("ok"):
-                    raise ValueError(
-                        str(result.get("error", "Failed to save tag responses.")) if isinstance(result, dict) else "Invalid save response."
-                    )
+                    raise ValueError(str(result.get("error", "Failed to save tag responses.")) if isinstance(result, dict) else "Invalid save response.")
                 flash(str(result.get("message", "Tag responses updated.")), "success")
             except Exception as exc:
                 flash(f"Invalid tag JSON: {exc}", "danger")
@@ -4229,9 +4315,7 @@ def create_app(
             mapping = response.get("mapping", {}) or {}
         else:
             flash(
-                str(response.get("error", "Failed to load tag responses."))
-                if isinstance(response, dict)
-                else "Failed to load tag responses.",
+                str(response.get("error", "Failed to load tag responses.")) if isinstance(response, dict) else "Failed to load tag responses.",
                 "danger",
             )
         tag_json = json.dumps(mapping, indent=2, sort_keys=True)
@@ -4264,9 +4348,7 @@ def create_app(
                 flash(str(result.get("message", "Guild settings updated.")), "success")
             else:
                 flash(
-                    str(result.get("error", "Failed to update guild settings."))
-                    if isinstance(result, dict)
-                    else "Failed to update guild settings.",
+                    str(result.get("error", "Failed to update guild settings.")) if isinstance(result, dict) else "Failed to update guild settings.",
                     "danger",
                 )
 
@@ -4307,9 +4389,7 @@ def create_app(
                 flash("Moderation settings updated.", "success")
             else:
                 flash(
-                    str(result.get("error", "Failed to update moderation settings."))
-                    if isinstance(result, dict)
-                    else "Failed to update moderation settings.",
+                    str(result.get("error", "Failed to update moderation settings.")) if isinstance(result, dict) else "Failed to update moderation settings.",
                     "danger",
                 )
 
@@ -4415,9 +4495,7 @@ def create_app(
         guild_ids = [int(value) for value in request.form.getlist("guild_ids") if str(value).isdigit()]
         allowed_users = {str(user.get("email", "")).strip().lower() for user in _list_users(db_path)}
         user_emails = [
-            email.strip().lower()
-            for email in request.form.getlist("user_emails")
-            if _is_valid_email(email) and email.strip().lower() in allowed_users
+            email.strip().lower() for email in request.form.getlist("user_emails") if _is_valid_email(email) and email.strip().lower() in allowed_users
         ]
         _set_guild_group_guilds(db_path, group_id, guild_ids)
         _set_guild_group_users(db_path, group_id, user_emails)
@@ -4695,6 +4773,26 @@ def create_app(
 
         return _render_page("account", "Web Admin Account", account_user=user)
 
+    @app.get("/admin/honeypot")
+    @login_required
+    def honeypot():
+        return _render_page("honeypot", "Honeypot & Join Guard")
+
+    @app.get("/admin/role-access")
+    @login_required
+    def role_access():
+        return _render_page("role_access", "Role Access")
+
+    @app.get("/admin/reaction-roles")
+    @login_required
+    def reaction_roles():
+        return _render_page("reaction_roles", "Reaction Roles")
+
+    @app.get("/admin/discourse")
+    @login_required
+    def discourse():
+        return _render_page("discourse", "Discourse")
+
     @app.get("/admin/settings")
     @login_required
     def settings():
@@ -4751,6 +4849,98 @@ def create_app(
         flash("Settings saved to env file. Restart container to apply runtime changes.", "success")
         return redirect(url_for("settings"))
 
+    @app.get("/admin/honeypot")
+    @login_required
+    def honeypot_page():
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _call_get_honeypot(selected_guild_id)
+        if not isinstance(payload, dict):
+            payload = {"ok": False, "error": "Honeypot data is unavailable."}
+        return _render_page("honeypot", "Honeypot", honeypot=payload)
+
+    @app.post("/admin/honeypot/save")
+    @login_required
+    def honeypot_save():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("honeypot")
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _build_honeypot_form_payload(request.form)
+        result = _call_manage_honeypot(payload, str(session.get("user", "")), selected_guild_id)
+        if not isinstance(result, dict) or not result.get("ok"):
+            flash(str(result.get("error")) if isinstance(result, dict) else "Failed to save honeypot settings.", "danger")
+        else:
+            flash("Honeypot settings updated.", "success")
+        return redirect(url_for("honeypot_page"))
+
+    @app.get("/admin/role-access")
+    @login_required
+    def role_access_page():
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _call_get_role_access(selected_guild_id)
+        if not isinstance(payload, dict):
+            payload = {"ok": False, "error": "Role access data is unavailable."}
+        return _render_page("role_access", "Role Access", role_access=payload)
+
+    @app.post("/admin/role-access/save")
+    @login_required
+    def role_access_save():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("role_access")
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _build_role_access_form_payload(request.form)
+        result = _call_manage_role_access(payload, str(session.get("user", "")), selected_guild_id)
+        if not isinstance(result, dict) or not result.get("ok"):
+            flash(str(result.get("error")) if isinstance(result, dict) else "Failed to save role access settings.", "danger")
+        else:
+            flash("Role access settings updated.", "success")
+        return redirect(url_for("role_access_page"))
+
+    @app.get("/admin/reaction-roles")
+    @login_required
+    def reaction_roles_page():
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _call_get_reaction_roles(selected_guild_id)
+        if not isinstance(payload, dict):
+            payload = {"ok": False, "error": "Reaction roles data is unavailable."}
+        return _render_page("reaction_roles", "Reaction Roles", reaction_roles=payload)
+
+    @app.post("/admin/reaction-roles/save")
+    @login_required
+    def reaction_roles_save():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("reaction_roles")
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _build_reaction_roles_form_payload(request.form)
+        result = _call_manage_reaction_roles(payload, str(session.get("user", "")), selected_guild_id)
+        if not isinstance(result, dict) or not result.get("ok"):
+            flash(str(result.get("error")) if isinstance(result, dict) else "Failed to save reaction roles.", "danger")
+        else:
+            flash("Reaction roles updated.", "success")
+        return redirect(url_for("reaction_roles_page"))
+
+    @app.get("/admin/discourse")
+    @login_required
+    def discourse_page():
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _call_get_discourse(selected_guild_id)
+        if not isinstance(payload, dict):
+            payload = {"ok": False, "error": "Discourse settings are unavailable."}
+        return _render_page("discourse", "Discourse", discourse=payload)
+
+    @app.post("/admin/discourse/save")
+    @login_required
+    def discourse_save():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("discourse")
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _build_discourse_form_payload(request.form)
+        result = _call_manage_discourse(payload, str(session.get("user", "")), selected_guild_id)
+        if not isinstance(result, dict) or not result.get("ok"):
+            flash(str(result.get("error")) if isinstance(result, dict) else "Failed to save discourse settings.", "danger")
+        else:
+            flash("Discourse settings updated.", "success")
+        return redirect(url_for("discourse_page"))
+
     return app
 
 
@@ -4765,7 +4955,7 @@ def start_web_admin(
     get_tag_responses: Callable[[int], dict] | Callable[[], dict] | None = None,
     save_tag_responses: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     get_guild_settings: Callable[[int], dict] | None = None,
-    save_guild_settings: Callable[[dict, str, int], dict] | None = None,
+    save_guild_settings: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     get_bot_profile: Callable[[int], dict] | Callable[[], dict] | None = None,
     update_bot_profile: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     update_bot_avatar: Callable[[bytes, str, str, int], dict] | Callable[[bytes, str, str], dict] | None = None,
@@ -4785,6 +4975,14 @@ def start_web_admin(
     resolve_youtube_community_seed: Callable[[str], dict] | None = None,
     resolve_wordpress_feed: Callable[[str], dict] | None = None,
     resolve_linkedin_feed: Callable[[str], dict] | None = None,
+    get_honeypot: Callable[[int], dict] | None = None,
+    manage_honeypot: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_role_access: Callable[[int], dict] | None = None,
+    manage_role_access: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_reaction_roles: Callable[[int], dict] | None = None,
+    manage_reaction_roles: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_discourse: Callable[[int], dict] | None = None,
+    manage_discourse: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     host: str = "127.0.0.1",
     port: int = 8081,
     ssl_context: str | tuple[str, str] | None = None,
@@ -4820,6 +5018,14 @@ def start_web_admin(
         resolve_youtube_community_seed=resolve_youtube_community_seed,
         resolve_wordpress_feed=resolve_wordpress_feed,
         resolve_linkedin_feed=resolve_linkedin_feed,
+        get_honeypot=get_honeypot,
+        manage_honeypot=manage_honeypot,
+        get_role_access=get_role_access,
+        manage_role_access=manage_role_access,
+        get_reaction_roles=get_reaction_roles,
+        manage_reaction_roles=manage_reaction_roles,
+        get_discourse=get_discourse,
+        manage_discourse=manage_discourse,
     )
 
     def run() -> None:

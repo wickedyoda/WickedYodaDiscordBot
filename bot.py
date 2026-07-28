@@ -64,6 +64,7 @@ from core.web_moderation import (
     validate_moderation_target,
 )
 from webui import start_web_admin
+from app.web_time import parse_iso_datetime_utc
 
 logging.basicConfig(
     level=logging.INFO,
@@ -295,6 +296,24 @@ COUNTDOWN_INPUT_FORMATS = (
     "%Y-%m-%dT%H:%M:%S",
 )
 ROLL_EXPRESSION_PATTERN = re.compile(r"^\s*(\d{1,2})d(\d{1,4})([+-]\d{1,4})?\s*$", re.IGNORECASE)
+DICE_CHOICES = [
+    app_commands.Choice(name="d4 (4-sided)", value="d4"),
+    app_commands.Choice(name="d6 (6-sided)", value="d6"),
+    app_commands.Choice(name="d8 (8-sided)", value="d8"),
+    app_commands.Choice(name="d10 (10-sided)", value="d10"),
+    app_commands.Choice(name="d00 / Percentile (10-sided)", value="d00"),
+    app_commands.Choice(name="d12 (12-sided)", value="d12"),
+    app_commands.Choice(name="d20 (20-sided)", value="d20"),
+]
+DICE_MEANING = {
+    "d4": "Triangular die for light weapon damage and low-level spells like Healing Word or Magic Missile.",
+    "d6": "Classic cube for standard weapon damage, character stats, and Fireball-style AoE.",
+    "d8": "Diamond-shaped die for mid-tier weapons and moderate spell damage.",
+    "d10": "Heavier weapon damage, fighter/paladin/ranger hit dice, and cantrips like Eldritch Blast.",
+    "d00": "Percentile d10 marked in tens (00-90), paired with a d10 for a 1-100% result.",
+    "d12": "Heavy weapon die for greataxe-style damage and Barbarian hit point rolls.",
+    "d20": "Core d20 for attack rolls, ability checks, and saving throws.",
+}
 NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 RPS_BEATS = {"rock": "scissors", "paper": "rock", "scissors": "paper"}
 FUN_GIF_LIBRARY: dict[str, list[dict[str, str]]] = {
@@ -5181,6 +5200,14 @@ class ModerationBot(commands.Bot):
                 resolve_youtube_community_seed=lambda source_url: resolve_youtube_community_seed(source_url),
                 resolve_wordpress_feed=lambda source_url: resolve_wordpress_feed_seed(source_url),
                 resolve_linkedin_feed=lambda source_url: resolve_linkedin_feed_seed(source_url),
+                get_honeypot=run_web_get_honeypot,
+                manage_honeypot=run_web_manage_honeypot,
+                get_role_access=run_web_get_role_access_mappings,
+                manage_role_access=run_web_manage_role_access_mappings,
+                get_reaction_roles=run_web_get_reaction_roles,
+                manage_reaction_roles=run_web_manage_reaction_roles,
+                get_discourse=run_web_get_discourse_settings,
+                manage_discourse=run_web_manage_discourse_settings,
                 host=WEB_BIND_HOST,
                 port=WEB_PORT,
             )
@@ -6334,28 +6361,48 @@ async def coinflip(interaction: discord.Interaction) -> None:
     await log_interaction(interaction, action="coinflip", reason=result.lower(), success=True)
 
 
-@bot.tree.command(name="roll", description="Roll dice like 1d20 or 2d6+3.")
-@app_commands.describe(expression="Dice expression, for example 1d20, 2d6+3, or 4d8-1")
-async def roll(interaction: discord.Interaction, expression: str = "1d20") -> None:
+@bot.tree.command(name="roll", description="Roll TTRPG dice with common RPG presets.")
+@app_commands.describe(
+    dice_type="Dice style / RPG preset.",
+    count="Number of dice to roll.",
+    modifier="Numeric modifier, for example +2 or -1.",
+)
+@app_commands.choices(dice_type=DICE_CHOICES)
+async def roll(
+    interaction: discord.Interaction,
+    dice_type: str = "d20",
+    count: int = 1,
+    modifier: int = 0,
+) -> None:
     if not await ensure_interaction_command_access(interaction, "roll"):
         return
+    preset = str(dice_type or "d20").strip().lower()
+    if preset == "d00":
+        preset = "d100"
     try:
-        result = execute_roll_expression(expression)
+        result = execute_roll_expression(f"{count}{preset}{modifier:+d}")
     except ValueError as exc:
         await reply_ephemeral(interaction, str(exc))
         await log_interaction(interaction, action="roll", reason=truncate_log_text(str(exc)), success=False)
         return
+    preset_meaning = DICE_MEANING.get("d00" if preset == "d100" and result["sides"] == 100 else preset, "")
     rolls_text = ", ".join(str(value) for value in result["rolls"])
-    modifier = int(result["modifier"])
-    modifier_text = f" | Modifier: {modifier:+d}" if modifier else ""
-    message = (
-        f"Expression: `{result['expression']}`\n"
-        f"Rolls: [{rolls_text}]\n"
-        f"Subtotal: {result['subtotal']}{modifier_text}\n"
-        f"Total: **{result['total']}**"
-    )
-    await interaction.response.send_message(message, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
-    await log_interaction(interaction, action="roll", reason=truncate_log_text(f"{result['expression']}={result['total']}"), success=True)
+    result_expression = str(result["expression"])
+    display_preset = "d00 / percentile" if str(result_expression).startswith("1d100") else f'{result["count"]}d{result["sides"]}'
+    if result["modifier"]:
+        display_preset += f' {result["modifier"]:+d}'
+    parts = [
+        f"Preset: `{display_preset}`",
+        f"Rolls: [{rolls_text}]",
+        f"Subtotal: {result['subtotal']}",
+    ]
+    if result["modifier"]:
+        parts.append(f"Modifier: {result['modifier']:+d}")
+    parts.append(f"Total: **{result['total']}**")
+    if preset_meaning:
+        parts.append(f"Used for: {preset_meaning}")
+    await interaction.response.send_message("\n".join(parts), ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+    await log_interaction(interaction, action="roll", reason=truncate_log_text(f"{display_preset}={result['total']}"), success=True)
 
 
 @bot.tree.command(name="choose", description="Choose between multiple options.")
