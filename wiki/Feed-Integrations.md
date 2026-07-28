@@ -1,6 +1,6 @@
 # Feed Integrations
 
-Last Updated: 2026-03-28
+Last Updated: 2026-07-28
 
 The bot supports background content notifications configured entirely through the web GUI. These feeds are guild-scoped: each server chooses its own sources, target channels, and polling schedules.
 

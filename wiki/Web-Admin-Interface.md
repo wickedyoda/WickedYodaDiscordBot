@@ -1,8 +1,8 @@
 # Web Admin Interface
 
-Last Updated: 2026-03-28
+Last Updated: 2026-07-28
 
-The web admin is served by `web_admin.py` and is mobile-friendly.
+The web admin is served by `web_admin.py`/`webui/app.py` and is mobile-friendly.
 
 ## Authentication and Session
 
