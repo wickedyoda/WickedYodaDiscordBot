@@ -4853,7 +4853,7 @@ def create_app(
     @login_required
     def honeypot_page():
         selected_guild_id, _, _ = _selected_guild_context()
-        payload = _call_get_honeypot(selected_guild_id)
+        payload = _call_honeypot_get(selected_guild_id)
         if not isinstance(payload, dict):
             payload = {"ok": False, "error": "Honeypot data is unavailable."}
         return _render_page("honeypot", "Honeypot", honeypot=payload)
@@ -4876,7 +4876,7 @@ def create_app(
     @login_required
     def role_access_page():
         selected_guild_id, _, _ = _selected_guild_context()
-        payload = _call_get_role_access(selected_guild_id)
+        payload = _call_role_access_get(selected_guild_id)
         if not isinstance(payload, dict):
             payload = {"ok": False, "error": "Role access data is unavailable."}
         return _render_page("role_access", "Role Access", role_access=payload)
@@ -4899,7 +4899,7 @@ def create_app(
     @login_required
     def reaction_roles_page():
         selected_guild_id, _, _ = _selected_guild_context()
-        payload = _call_get_reaction_roles(selected_guild_id)
+        payload = _call_reaction_roles_get(selected_guild_id)
         if not isinstance(payload, dict):
             payload = {"ok": False, "error": "Reaction roles data is unavailable."}
         return _render_page("reaction_roles", "Reaction Roles", reaction_roles=payload)
@@ -4922,7 +4922,7 @@ def create_app(
     @login_required
     def discourse_page():
         selected_guild_id, _, _ = _selected_guild_context()
-        payload = _call_get_discourse(selected_guild_id)
+        payload = _call_discourse_get(selected_guild_id)
         if not isinstance(payload, dict):
             payload = {"ok": False, "error": "Discourse settings are unavailable."}
         return _render_page("discourse", "Discourse", discourse=payload)
