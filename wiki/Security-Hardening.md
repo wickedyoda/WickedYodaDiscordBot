@@ -1,6 +1,6 @@
 # Security Hardening
 
-Last Updated: 2026-03-28
+Last Updated: 2026-07-28
 
 This document tracks the active security controls implemented in the bot and web admin.
 
