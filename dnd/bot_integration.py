@@ -24,15 +24,10 @@ def ensure_dnd_schema() -> None:
 
 
 def register_dnd_commands(bot, helpers=None) -> None:
-    if helpers is None:
-        helpers = {
-            "reply_ephemeral": None,
-            "log_interaction": None,
-            "ensure_interaction_command_access": None,
-        }
-    reply_ephemeral = helpers["reply_ephemeral"]
-    log_interaction = helpers["log_interaction"]
-    ensure_interaction_command_access = helpers["ensure_interaction_command_access"]
+    reply_ephemeral = helpers["reply_ephemeral"] if helpers else None
+    log_interaction = helpers["log_interaction"] if helpers else None
+    ensure_interaction_command_access = helpers["ensure_interaction_command_access"] if helpers else None
+
 
     dnd_group = bot.tree.get_command("dnd")
     if dnd_group is None:

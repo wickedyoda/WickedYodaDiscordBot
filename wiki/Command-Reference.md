@@ -107,6 +107,50 @@ Response visibility for most slash commands is controlled by `COMMAND_RESPONSES_
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
   - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history.
 
+## `/dnd`
+
+- Description: D&D 20th Anniversary helper family.
+- Parent group: `/dnd`
+- Required user permissions: none for public subcommands
+- Bot action:
+  - Uses local SQLite storage under `/app/data/dnd.db`.
+  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`.
+  - Logs success/failure to configured guild log channel and SQLite action history.
+- Subcommands:
+  - `/dnd roll`
+    - Description: 20th Anniversary Edition dice roll.
+    - Parameters:
+      - `pool` (`int`) - number of dice to roll, `1-50`
+      - `difficulty` (`int`) - success threshold, `2-10`
+      - `willpower` (`bool`) - add 1 automatic success
+      - `modifier` (`int`, optional) - automatic successes/penalties, `-20` to `20`
+      - `speciality` (`str`, optional) - specialty applied to the roll
+      - `nightmare` (`int`, optional) - nightmare dice count, `0-50`
+      - `no_botch` (`bool`) - 1s do not remove successes
+      - `character` (`str`, optional) - linked character name
+      - `notes` (`str`, optional) - extra notes
+  - `/dnd general`
+    - Description: General multi-set dice roll.
+    - Parameters:
+      - `dice_set_01` (`str`) - required dice set, e.g. `2d6`
+      - `dice_set_02` through `dice_set_05` (`str`, optional) - additional dice sets
+      - `modifier` (`int`, optional) - add/subtract from total
+      - `difficulty` (`int`, optional) - total needed to pass
+      - `notes` (`str`, optional) - extra notes
+  - `/dnd initiative`
+    - Description: Initiative tracker helpers.
+    - Parameters:
+      - `action` (`str`) - `new` to start a tracker, `roll` to add an entry
+      - `dex_wits` (`int`) - Dexterity + Wits total
+      - `character` (`str`, optional) - linked character name
+      - `notes` (`str`, optional) - extra notes
+  - `/dnd character`
+    - Description: Storage-backed character helpers.
+    - Parameters:
+      - `action` (`str`) - `find`, `list`, or `delete`
+      - `splat` (`str`, optional) - character type context
+      - `name` (`str`, optional) - character name target
+
 ## `/choose`
 
 - Description: Pick one option from a comma-, pipe-, or newline-separated list.
