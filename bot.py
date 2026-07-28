@@ -65,11 +65,8 @@ from core.web_moderation import (
     validate_moderation_target,
 )
 from webui import start_web_admin
-<<<<<<< HEAD
-=======
 from app.web_time import parse_iso_datetime_utc
 from dnd.bot_integration import ensure_dnd_schema, register_dnd_commands
->>>>>>> 52a468e (Add D&D 20th sub-category commands and SQLite persistence)
 
 logging.basicConfig(
     level=logging.INFO,
