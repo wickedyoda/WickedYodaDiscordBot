@@ -7062,8 +7062,8 @@ async def birthday_remove(interaction: discord.Interaction) -> None:
 
 
 bot.tree.add_command(birthday_group)
-register_dnd_commands(bot)
 bot.tree.add_command(dnd_group)
+register_dnd_commands(bot)
 
 
 @bot.tree.command(name="shorten", description="Create a short URL.")
