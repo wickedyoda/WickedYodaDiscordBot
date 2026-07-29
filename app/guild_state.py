@@ -113,6 +113,7 @@ class GuildStateManager:
             "welcome_image_width": 0,
             "welcome_image_height": 0,
             "welcome_image_base64": "",
+            "dnd_category_id": 0,
             "updated_at": "",
             "updated_by_email": "",
         }
@@ -187,6 +188,7 @@ class GuildStateManager:
                     "welcome_image_width",
                     "welcome_image_height",
                     "welcome_image_base64",
+                    "dnd_category_id",
                     "updated_at",
                     "updated_by_email",
                 )
@@ -197,7 +199,7 @@ class GuildStateManager:
                 SELECT {", ".join(selected_columns)}
                 FROM guild_settings
                 WHERE guild_id = ?
-                """,  # nosec B608
+                """,
                 (safe_guild_id,),
             ).fetchone()
         if row is not None:
@@ -245,6 +247,7 @@ class GuildStateManager:
                     "welcome_image_width": int(row["welcome_image_width"] or 0),
                     "welcome_image_height": int(row["welcome_image_height"] or 0),
                     "welcome_image_base64": str(row["welcome_image_base64"] or ""),
+                    "dnd_category_id": int(row["dnd_category_id"] or 0) if "dnd_category_id" in available_columns else 0,
                     "updated_at": str(row["updated_at"] or ""),
                     "updated_by_email": str(row["updated_by_email"] or ""),
                 }
@@ -275,6 +278,7 @@ class GuildStateManager:
             "hi_channel_id",
             "access_role_id",
             "welcome_channel_id",
+            "dnd_category_id",
         ):
             merged[key] = self.parse_int_setting(source.get(key, current.get(key, 0)), 0, minimum=0)
         merged["hi_channel_text"] = (
@@ -438,6 +442,7 @@ class GuildStateManager:
                     "welcome_image_width",
                     "welcome_image_height",
                     "welcome_image_base64",
+                    "dnd_category_id",
                     "updated_at",
                     "updated_by_email",
                 )
@@ -486,6 +491,7 @@ class GuildStateManager:
                 "welcome_image_width": merged["welcome_image_width"],
                 "welcome_image_height": merged["welcome_image_height"],
                 "welcome_image_base64": merged["welcome_image_base64"],
+                "dnd_category_id": merged.get("dnd_category_id", 0),
                 "updated_at": updated_at,
                 "updated_by_email": actor_email or "unknown",
             }

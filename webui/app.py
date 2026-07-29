@@ -1318,7 +1318,9 @@ def _ensure_users_table(db_path: str) -> None:
                 is_admin INTEGER NOT NULL DEFAULT 0,
                 is_guild_admin INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
-                password_changed_at TEXT NOT NULL
+                password_changed_at TEXT NOT NULL,
+                discord_user_id INTEGER,
+                discord_username TEXT
             )
             """
         )
@@ -1334,6 +1336,13 @@ def _ensure_users_table(db_path: str) -> None:
             conn.execute("UPDATE web_users SET password_changed_at = COALESCE(password_changed_at, created_at)")
         if "is_guild_admin" not in columns:
             conn.execute("ALTER TABLE web_users ADD COLUMN is_guild_admin INTEGER NOT NULL DEFAULT 0")
+        if "discord_user_id" not in columns:
+            conn.execute("ALTER TABLE web_users ADD COLUMN discord_user_id INTEGER")
+        if "discord_username" not in columns:
+            conn.execute("ALTER TABLE web_users ADD COLUMN discord_username TEXT")
+        current_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(web_users)").fetchall()}
+        if "discord_user_id" in current_columns and "discord_username" in current_columns:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_web_users_discord_user_id ON web_users(discord_user_id)")
         conn.commit()
 
 
@@ -1561,7 +1570,7 @@ def _get_user(db_path: str, email: str) -> dict | None:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             """
-            SELECT email, password_hash, display_name, first_name, last_name, is_admin, is_guild_admin, created_at, password_changed_at
+            SELECT email, password_hash, display_name, first_name, last_name, is_admin, is_guild_admin, created_at, password_changed_at, discord_user_id, discord_username
             FROM web_users
             WHERE email = ?
             """,
@@ -1576,7 +1585,7 @@ def _list_users(db_path: str) -> list[dict]:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT email, display_name, first_name, last_name, is_admin, is_guild_admin, created_at
+            SELECT email, display_name, first_name, last_name, is_admin, is_guild_admin, created_at, discord_user_id, discord_username
             FROM web_users
             ORDER BY email ASC
             """
@@ -1603,6 +1612,7 @@ def _update_user_record(
     is_admin: bool,
     is_guild_admin: bool,
     password_hash: str | None = None,
+    discord_user_id: int | None = None,
 ) -> tuple[bool, str]:
     _ensure_users_table(db_path)
     existing = _get_user(db_path, current_email)
@@ -1627,7 +1637,7 @@ def _update_user_record(
         conn.execute(
             """
             UPDATE web_users
-            SET email = ?, password_hash = ?, display_name = ?, first_name = ?, last_name = ?, is_admin = ?, is_guild_admin = ?, password_changed_at = ?
+            SET email = ?, password_hash = ?, display_name = ?, first_name = ?, last_name = ?, is_admin = ?, is_guild_admin = ?, password_changed_at = ?, discord_user_id = ?, discord_username = web_users.discord_username
             WHERE email = ?
             """,
             (
@@ -1639,6 +1649,7 @@ def _update_user_record(
                 int(is_admin),
                 int(is_guild_admin),
                 password_changed_at,
+                int(discord_user_id) if discord_user_id is not None else None,
                 current_email.strip().lower(),
             ),
         )
@@ -4366,6 +4377,7 @@ def create_app(
             payload = {
                 "bot_log_channel_id": request.form.get("bot_log_channel_id", "").strip(),
                 "uptime_alert_channel_id": request.form.get("uptime_alert_channel_id", "").strip(),
+                "dnd_category_id": request.form.get("dnd_category_id", "").strip(),
             }
             result = _call_save_guild_settings(payload, str(session.get("user", "")), selected_guild_id)
             if isinstance(result, dict) and result.get("ok"):
@@ -4381,11 +4393,14 @@ def create_app(
         settings_payload = _call_get_guild_settings(selected_guild_id)
         selected_log_channel_id = ""
         selected_uptime_channel_id = ""
+        selected_dnd_category_id = ""
         if isinstance(settings_payload, dict):
             raw_channel_id = settings_payload.get("bot_log_channel_id", "")
             selected_log_channel_id = str(raw_channel_id).strip() if raw_channel_id is not None else ""
             raw_uptime_channel_id = settings_payload.get("uptime_alert_channel_id", "")
             selected_uptime_channel_id = str(raw_uptime_channel_id).strip() if raw_uptime_channel_id is not None else ""
+            raw_dnd_category_id = settings_payload.get("dnd_category_id", "")
+            selected_dnd_category_id = str(raw_dnd_category_id).strip() if raw_dnd_category_id is not None else ""
         return _render_page(
             "guild_settings",
             "Guild Settings",
@@ -4393,6 +4408,7 @@ def create_app(
             notification_channels=channel_options,
             selected_log_channel_id=selected_log_channel_id,
             selected_uptime_channel_id=selected_uptime_channel_id,
+            selected_dnd_category_id=selected_dnd_category_id,
         )
 
     @app.route("/admin/moderation", methods=["GET", "POST"])
@@ -4702,6 +4718,8 @@ def create_app(
             display_name = request.form.get("display_name", "").strip()
             first_name = request.form.get("first_name", "").strip()
             last_name = request.form.get("last_name", "").strip()
+            raw_discord_user_id = request.form.get("discord_user_id", "").strip()
+            discord_user_id = raw_discord_user_id if raw_discord_user_id.isdigit() else None
             password_rotation_required = bool(session.get("password_rotation_required"))
             if not check_password_hash(str(user["password_hash"]), current_password):
                 flash("Current password is incorrect.", "danger")
@@ -4732,6 +4750,7 @@ def create_app(
                     last_name=last_name,
                     is_admin=bool(user.get("is_admin")),
                     is_guild_admin=bool(user.get("is_guild_admin")),
+                    discord_user_id=discord_user_id,
                     password_hash=generate_password_hash(new_password) if new_password else None,
                 )
                 if not ok:
@@ -4752,6 +4771,7 @@ def create_app(
                     last_name=last_name,
                     is_admin=bool(user.get("is_admin")),
                     is_guild_admin=bool(user.get("is_guild_admin")),
+                    discord_user_id=discord_user_id,
                     password_hash=None,
                 )
                 if not ok:
@@ -4792,6 +4812,7 @@ def create_app(
                 last_name=str(user.get("last_name", "")),
                 is_admin=bool(user.get("is_admin")),
                 is_guild_admin=bool(user.get("is_guild_admin")),
+                discord_user_id=discord_user_id or user.get("discord_user_id"),
                 password_hash=generate_password_hash(new_password),
             )
             if not ok:

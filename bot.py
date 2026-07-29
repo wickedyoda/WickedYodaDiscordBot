@@ -2492,6 +2492,7 @@ class ActionStore:
                 "moderation_warning_threshold": "ALTER TABLE guild_settings ADD COLUMN moderation_warning_threshold INTEGER NOT NULL DEFAULT 3",
                 "moderation_action": "ALTER TABLE guild_settings ADD COLUMN moderation_action TEXT NOT NULL DEFAULT 'timeout'",
                 "moderation_timeout_minutes": "ALTER TABLE guild_settings ADD COLUMN moderation_timeout_minutes INTEGER NOT NULL DEFAULT 10",
+                "dnd_category_id": "ALTER TABLE guild_settings ADD COLUMN dnd_category_id INTEGER NOT NULL DEFAULT 0",
             }
             for column, statement in guild_settings_migrations.items():
                 if column not in guild_settings_columns:
@@ -5365,7 +5366,9 @@ class ModerationBot(commands.Bot):
             return []
         options: list[dict] = []
         for channel in sorted(guild.text_channels, key=lambda item: (item.position, item.name.lower())):
-            options.append({"id": channel.id, "name": f"#{channel.name}", "nsfw": bool(channel.is_nsfw())})
+            options.append({"id": channel.id, "name": f"#{channel.name}", "nsfw": bool(channel.is_nsfw()), "type": "text"})
+        for channel in sorted(guild.categories, key=lambda item: (item.position, item.name.lower())):
+            options.append({"id": channel.id, "name": f"/{channel.name}", "type": "category"})
         return options
 
     def build_web_role_options(self, guild_id: int) -> list[dict]:
@@ -7069,6 +7072,7 @@ register_dnd_commands(
         "reply_ephemeral": reply_ephemeral,
         "log_interaction": log_interaction,
         "ensure_interaction_command_access": ensure_interaction_command_access,
+        "save_guild_settings": ACTION_STORE.save_guild_settings,
     },
 )
 

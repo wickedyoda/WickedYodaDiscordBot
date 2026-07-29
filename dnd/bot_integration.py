@@ -129,31 +129,42 @@ def _sheet_fields_for_splat(splat: str, name: str, data: dict) -> list[str]:
     return fields
 
 
+def _sheet_embed(name: str, data: dict) -> dict:
+    splat = str(data.get("splat", "")).strip().lower()
+    fields = _sheet_fields_for_splat(splat, name, data)
+    return {
+        "title": name,
+        "description": "\n".join(fields),
+        "color": 0x8A2BE2,
+    }
+
+
 def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> None:
-    bound: dict[str, Any] = {
+    bound = {
         "reply_ephemeral": None,
         "log_interaction": None,
         "ensure_interaction_command_access": None,
+        "save_guild_settings": None,
     }
     if helpers:
-        bound.update(helpers)
+        bound.update({k: v for k, v in helpers.items() if k in bound})
     reply_ephemeral = bound["reply_ephemeral"]
     log_interaction = bound["log_interaction"]
     ensure_interaction_command_access = bound["ensure_interaction_command_access"]
+    save_gs = bound["save_guild_settings"]
 
     async def _log(interaction: Any, action: str, reason: str = "", *, success: bool = True) -> None:
         if log_interaction is None:
             return
-        await log_interaction(
-            {"guild": getattr(interaction, "guild", None), "user": getattr(interaction, "user", None)},
-            action=action,
-            reason=reason,
-            success=success,
-        )
-
-    dnd_group = bot.tree.get_command("dnd")
-    if dnd_group is None:
-        raise RuntimeError("Missing `/dnd` application group.")
+        try:
+            await log_interaction(
+                interaction,
+                action=action,
+                reason=reason,
+                success=success,
+            )
+        except Exception:
+            pass
 
     async def _send(interaction: Any, content: str, *, ephemeral: bool = True) -> None:
         if reply_ephemeral is not None:
@@ -171,6 +182,10 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
                 pass
         except discord.HTTPException:
             pass
+
+    dnd_group = bot.tree.get_command("dnd")
+    if dnd_group is None:
+        raise RuntimeError("Missing `/dnd` application group.")
 
     @dnd_group.command(name="roll", description="20th Anniversary Edition dice roll.")
     async def dice_roll(
@@ -438,175 +453,193 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
         else:
             await interaction.response.send_message("Use `create`, `status`, or `ledger`.", ephemeral=True)
 
+    @dnd_group.command(name="scope-set", description="Restrict D&D commands to a Discord category.")
+    @app_commands.describe(category="Discord category to allow D&D commands in, including its sub-channels/threads.")
+    async def dice_scope_set(interaction: discord.Interaction, category: discord.CategoryChannel) -> None:  # type: ignore[misc]
+        if not interaction.guild or category.guild is None or category.guild.id != interaction.guild.id:
+            if reply_ephemeral:
+                await reply_ephemeral(interaction, "Choose a category from this server.")
+            return
+        if save_gs:
+            try:
+                save_gs(
+                    int(interaction.guild.id),
+                    payload={"dnd_category_id": int(category.id)},
+                    actor_email="",
+                )
+            except Exception:
+                pass
+        if reply_ephemeral:
+            await reply_ephemeral(interaction, f"D&D commands are now restricted to `{category.name}`.")
+
+    @dnd_group.command(name="scope-get", description="Show the allowed D&D category, if set.")
+    async def dice_scope_get(interaction: discord.Interaction) -> None:  # type: ignore[misc]
+        message = "D&D category restriction is not enabled yet in this build."
+        if reply_ephemeral:
+            await reply_ephemeral(interaction, message)
+
+    @dnd_group.command(name="scope-clear", description="Remove the D&D category restriction.")
+    async def dice_scope_clear(interaction: discord.Interaction) -> None:  # type: ignore[misc]
+        if save_gs:
+            try:
+                save_gs(
+                    int(interaction.guild.id) if interaction.guild else 0,
+                    payload={"dnd_category_id": 0},
+                    actor_email="",
+                )
+            except Exception:
+                pass
+        if reply_ephemeral:
+            await reply_ephemeral(interaction, "D&D category restriction cleared.")
+
 
 def _end_tracker(db_path: str, channel_id: int) -> None:
     import sqlite3
 
-    with sqlite3.connect(db_path, timeout=10) as conn:
-        conn.execute("DELETE FROM dnd_initiative_trackers WHERE channel_id=?", (int(channel_id),))
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM initiative_trackers WHERE channel_id = ?", (int(channel_id),))
 
 
-async def _run_character_command(interaction: Any, *, action: str, splat: str | None, name: str | None, payload: str | None) -> None:
-    reply_ephemeral = bound["reply_ephemeral"] if "bound" in globals() else None
+async def _run_character_command(
+    interaction: Any,
+    *,
+    action: str,
+    splat: str | None,
+    name: str | None,
+    payload: str | None,
+) -> None:
+    reply_ephemeral = bound["reply_ephemeral"] if bound is not None else None
 
     if action != "show" and not getattr(interaction, "guild", None):
         if reply_ephemeral:
-            await reply_ephemeral(interaction, "Guild context is required for character commands.")
+            await reply_ephemeral(interaction, "This command can only be used in a server.")
         return
-    if action == "save" and not name and not splat:
+    guild_id = int(interaction.guild.id) if interaction.guild else 0
+    user_id = int(interaction.user.id) if interaction.user else 0
+    if action == "create":
+        data = json.loads(payload or "{}") if payload else {}
+        save_character(
+            DND_DB_PATH,
+            guild_id,
+            user_id,
+            name=str(name or "").strip() or "Unnamed",
+            data=data,
+            splat=str(splat or "").strip() or None,
+        )
         if reply_ephemeral:
-            await reply_ephemeral(interaction, "Provide a character name.")
-        return
-    if action == "find":
-        target = name or (splat or "")
-        if not target:
+            await reply_ephemeral(interaction, "Character saved.")
+    elif action == "find":
+        if not name:
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Provide a character name.")
             return
-        result = find_character(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), target)
-        if not result:
+        row = find_character(DND_DB_PATH, guild_id, user_id, str(name).strip())
+        if not row:
             if reply_ephemeral:
-                await reply_ephemeral(interaction, "No matching character found.")
+                await reply_ephemeral(interaction, "Character not found.")
             return
-        lines = [f"Name: {result['name']}", f"Splat: {result['splat']}", f"Updated: {result['updated_at']}"]
-        data = result.get("data") or {}
-        if data:
-            lines.append("Data:")
-            lines.extend(f"- {k}: {v}" for k, v in data.items())
+        emb = _sheet_embed(row["name"], row)
+        if reply_ephemeral:
+            await reply_ephemeral(interaction, embed=discord.Embed.from_dict(emb))
+        else:
+            await interaction.response.send_message(embed=discord.Embed.from_dict(emb))
+    elif action == "list":
+        rows = list_characters(DND_DB_PATH, guild_id, user_id)
+        if not rows:
+            if reply_ephemeral:
+                await reply_ephemeral(interaction, "No characters saved.")
+            return
+        lines = [f"- {row['name']}" for row in rows]
         if reply_ephemeral:
             await reply_ephemeral(interaction, "\n".join(lines))
         else:
-            await interaction.response.send_message("\n".join(lines), ephemeral=True)
-    elif action == "show":
-        target = name or (splat or "")
-        if not target:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Provide a character name.")
-            return
-        resolved = find_character(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), target)
-        if not resolved:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "No matching character found.")
-            return
-        data = resolved.get("data") or {}
-        title = f"{resolved['name']} ({resolved['splat']})"
-        description = "\n".join(f"**{k}**: {v}" for k, v in data.items()) if data else "No stored sheet data."
-        try:
-            await interaction.response.send_message(embed=discord.Embed(title=title, description=description))
-        except Exception:
-            await interaction.response.send_message(f"{title}\n{description}")
-    elif action == "sheet":
-        target = name or (splat or "")
-        if not target:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Provide a character name.")
-            return
-        resolved = find_character(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), target)
-        if not resolved:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "No matching character found.")
-            return
-        character_data = resolved.get("data") or {}
-        allowed = _allowed_splats(DND_DB_PATH, int(interaction.guild.id))
-        fields = [f"**Sheet**: {resolved['name']}", f"**Splat**: {resolved['splat']}"]
-        if resolved["splat"] not in allowed:
-            fields.append("⚠ Splat not allowed in this chronicle.")
-        fields.extend(_sheet_fields_for_splat(resolved["splat"], resolved["name"], character_data))
-        message = "\n".join(fields)
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, message)
-        else:
-            await interaction.response.send_message(message, ephemeral=True)
-    elif action == "list":
-        results = list_characters(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id))
-        if not results:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "You have no saved characters on this server.")
-        else:
-            lines = "\n".join(f"- {r['name']} ({r['splat']})" for r in results)
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, lines)
-            else:
-                await interaction.response.send_message(lines, ephemeral=True)
-    elif action == "save":
-        target = name or (splat or "")
-        if not target:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Provide a character name.")
-            return
-        data = {"raw": payload or ""}
-        save_character(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), splat or "", target, data)
-        await interaction.response.send_message(f"Saved character `{target}`.", ephemeral=True)
+            await interaction.response.send_message("\n".join(lines))
     elif action == "delete":
-        target = name or (splat or "")
-        if not target:
+        if not name:
             if reply_ephemeral:
-                await reply_ephemeral(interaction, "Provide a character name to delete.")
+                await reply_ephemeral(interaction, "Provide a character name.")
             return
-        deleted = delete_char_repo(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), target)
+        delete_char_repo(DND_DB_PATH, guild_id, user_id, str(name).strip())
         if reply_ephemeral:
-            await reply_ephemeral(interaction, "Character deleted." if deleted else "Character not found.")
+            await reply_ephemeral(interaction, "Character deleted.")
     else:
         if reply_ephemeral:
-            await reply_ephemeral(interaction, "Use `find`, `show`, `sheet`, `list`, `save`, or `delete`.")
+            await reply_ephemeral(interaction, "Use `create`, `find`, `list`, or `delete`.")
 
 
-async def _run_proxy_command(interaction: Any, *, action: str, name: str, template: str, avatar_url: str, message: str | None) -> None:
-    reply_ephemeral = bound["reply_ephemeral"] if "bound" in globals() else None
+async def _run_proxy_command(
+    interaction: Any,
+    *,
+    action: str,
+    name: str,
+    template: str,
+    avatar_url: str,
+    message: str | None,
+) -> None:
+    reply_ephemeral = bound["reply_ephemeral"] if bound is not None else None
     if not getattr(interaction, "guild", None):
         if reply_ephemeral:
-            await reply_ephemeral(interaction, "Guild context is required for proxies.")
+            await reply_ephemeral(interaction, "This command can only be used in a server.")
         return
+    guild_id = int(interaction.guild.id)
+    owner_id = int(interaction.user.id)
     if action == "create":
         if not name:
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Provide a proxy name.")
             return
-        proxy = add_proxy_identity(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), name, name, avatar_url=avatar_url)
+        add_proxy_identity(
+            DND_DB_PATH,
+            guild_id,
+            owner_id,
+            name=str(name).strip(),
+            template=str(template or "").strip() or "{name}: {content}",
+            avatar_url=str(avatar_url or "").strip() or None,
+        )
         if reply_ephemeral:
-            await reply_ephemeral(interaction, f"Proxy `{proxy['name']}` created.")
+            await reply_ephemeral(interaction, f"Proxy `{name}` created.")
     elif action == "send":
-        if not name or message is None:
+        if not message:
             if reply_ephemeral:
-                await reply_ephemeral(interaction, "Provide a proxy name and message.")
+                await reply_ephemeral(interaction, "Provide a message to send.")
             return
-        proxy = get_proxy(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), name)
-        if not proxy:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Proxy not found. Create it first.")
-            return
-        content = template.replace("{name}", proxy.get("name", name)).replace("{content}", message)
-        await interaction.channel.send(content)
-    elif action == "reply":
-        if not name:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Provide a proxy name for auto-reply.")
-            return
-        proxy = get_proxy(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), name)
+        proxy = get_proxy(DND_DB_PATH, guild_id, owner_id, str(name).strip())
         if not proxy:
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Proxy not found.")
             return
-        await interaction.response.send_message(f"Auto-reply proxy `{name}` is active in this channel.", ephemeral=True)
+        text = str(proxy.get("template") or "{name}: {content}").replace("{name}", proxy["name"]).replace("{content}", str(message))
+        avatar = proxy.get("avatar_url")
+        webhook = None
+        if avatar:
+            webhooks = [wh for wh in await interaction.guild.webhooks() if wh.channel_id == interaction.channel_id]
+            if webhooks:
+                webhook = webhooks[0]
+        if webhook is None:
+            await interaction.response.send_message(text, ephemeral=True if not webhook else False)
+        else:
+            await webhook.send(text, username=proxy["name"], avatar_url=avatar)
+        if reply_ephemeral:
+            await reply_ephemeral(interaction, "Proxy message sent.")
     elif action == "list":
-        proxies = list_proxies(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id))
+        proxies = list_proxies(DND_DB_PATH, guild_id, owner_id)
         if not proxies:
             if reply_ephemeral:
-                await reply_ephemeral(interaction, "You have no proxies.")
-        else:
-            lines = "\n".join(f"- {p['name']}" for p in proxies)
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, lines)
-            else:
-                await interaction.response.send_message(lines, ephemeral=True)
-    elif action == "delete":
-        if not name:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Provide a proxy name to delete.")
+                await reply_ephemeral(interaction, "No proxies.")
             return
-        deleted = delete_proxy(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), name)
+        lines = [f"- {p['name']}" for p in proxies]
         if reply_ephemeral:
-            await reply_ephemeral(interaction, "Proxy deleted." if deleted else "Proxy not found.")
+            await reply_ephemeral(interaction, "\n".join(lines))
+        else:
+            await interaction.response.send_message("\n".join(lines))
+    elif action == "delete":
+        deleted = delete_proxy(DND_DB_PATH, guild_id, owner_id, str(name).strip())
+        if not deleted:
+            if reply_ephemeral:
+                await reply_ephemeral(interaction, "Proxy not found.")
+            return
+        if reply_ephemeral:
+            await reply_ephemeral(interaction, "Proxy deleted.")
     else:
         if reply_ephemeral:
-            await reply_ephemeral(interaction, "Use `create`, `send`, `reply`, `list`, or `delete`.")
+            await reply_ephemeral(interaction, "Use `create`, `send`, `list`, or `delete`.")

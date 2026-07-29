@@ -2906,6 +2906,11 @@ PAGE_TEMPLATE = """
                 <input class="form-control" id="account_email" name="email" type="email" value="{{ account_user.email or '' }}" required>
               </div>
               <div class="mt-3">
+                <label class="form-label" for="account_discord_user_id">Discord User ID (optional)</label>
+                <input class="form-control" id="account_discord_user_id" name="discord_user_id" type="number" placeholder="123456789012345678" value="{{ account_user.discord_user_id or '' }}">
+                <div class="form-text">Optional public Discord account link for your web profile.</div>
+              </div>
+              <div class="mt-3">
                 <label class="form-label" for="account_profile_password">Current Password</label>
                 <input class="form-control" id="account_profile_password" name="current_password" type="password" required>
                 <div class="form-text">Required to change your email or name.</div>
@@ -2960,6 +2965,20 @@ PAGE_TEMPLATE = """
               {% endfor %}
             </select>
             <div class="form-text">Optional override for uptime monitor alerts; falls back to the bot log channel when unset.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="dnd_category_id">DND Allowed Category</label>
+            <select class="form-select" id="dnd_category_id" name="dnd_category_id" {% if not can_manage_guild %}disabled{% endif %}>
+              <option value="">All categories allowed</option>
+              {% for channel in notification_channels %}
+              {% if channel.type == 'category' %}
+              <option value="{{ channel.id }}" {% if selected_dnd_category_id == channel.id|string %}selected{% endif %}>
+                {{ channel.name }} ({{ channel.id }})
+              </option>
+              {% endif %}
+              {% endfor %}
+            </select>
+            <div class="form-text">When set, D&D commands only respond inside this category, its sub-channels, and sub-threads.</div>
           </div>
           <button class="btn btn-primary" type="submit" {% if not can_manage_guild %}disabled{% endif %}>Save Guild Settings</button>
         </form>
