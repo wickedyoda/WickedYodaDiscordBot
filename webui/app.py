@@ -4366,6 +4366,7 @@ def create_app(
             payload = {
                 "bot_log_channel_id": request.form.get("bot_log_channel_id", "").strip(),
                 "uptime_alert_channel_id": request.form.get("uptime_alert_channel_id", "").strip(),
+                "dnd_category_id": request.form.get("dnd_category_id", "").strip(),
             }
             result = _call_save_guild_settings(payload, str(session.get("user", "")), selected_guild_id)
             if isinstance(result, dict) and result.get("ok"):
@@ -4381,11 +4382,14 @@ def create_app(
         settings_payload = _call_get_guild_settings(selected_guild_id)
         selected_log_channel_id = ""
         selected_uptime_channel_id = ""
+        selected_dnd_category_id = ""
         if isinstance(settings_payload, dict):
             raw_channel_id = settings_payload.get("bot_log_channel_id", "")
             selected_log_channel_id = str(raw_channel_id).strip() if raw_channel_id is not None else ""
             raw_uptime_channel_id = settings_payload.get("uptime_alert_channel_id", "")
             selected_uptime_channel_id = str(raw_uptime_channel_id).strip() if raw_uptime_channel_id is not None else ""
+            raw_dnd_category_id = settings_payload.get("dnd_category_id", "")
+            selected_dnd_category_id = str(raw_dnd_category_id).strip() if raw_dnd_category_id is not None else ""
         return _render_page(
             "guild_settings",
             "Guild Settings",
@@ -4393,6 +4397,7 @@ def create_app(
             notification_channels=channel_options,
             selected_log_channel_id=selected_log_channel_id,
             selected_uptime_channel_id=selected_uptime_channel_id,
+            selected_dnd_category_id=selected_dnd_category_id,
         )
 
     @app.route("/admin/moderation", methods=["GET", "POST"])
