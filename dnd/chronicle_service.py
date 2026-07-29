@@ -175,7 +175,7 @@ def create_reward_rule(db_path: str, guild_id: int, name: str = "Reward Rule") -
     return {"id": rule_id, "name": name}
 
 
-def upsert_reward_tier(db_path: str, rule_id: int, idx: int = 0, threshold: int = 1, reward: float = 1) -> None:
+def upsert_reward_tier(db_path: str, rule_id: int, idx: int = 0, threshold: int = 1, reward: float = 1.0) -> None:
     with _get_conn(db_path) as conn:
         conn.execute(
             "INSERT INTO dnd_reward_tiers(rule_id, idx, threshold, reward) VALUES(?,?,?,?) "

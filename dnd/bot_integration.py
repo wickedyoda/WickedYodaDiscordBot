@@ -349,7 +349,7 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
                 await reply_ephemeral(interaction, "Use `create`, `show`, or `update`.")
 
     @dnd_group.command(name="xp", description="Experience point helpers.")
-    async def dice_xp(interaction: discord.Interaction, action: str = "add", amount: float = 1, reason: str = "") -> None:  # type: ignore[misc]
+    async def dice_xp(interaction: discord.Interaction, action: str = "add", amount: float = 1.0, reason: str = "") -> None:  # type: ignore[misc]
         if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_xp"):
             return
         if not interaction.guild:
@@ -378,7 +378,7 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
 
     @dnd_group.command(name="reward", description="Auto reward helpers.")
     async def dice_reward(
-        interaction: discord.Interaction, action: str = "status", rule_name: str = "", threshold: int = 10, reward: float = 1
+        interaction: discord.Interaction, action: str = "status", rule_name: str = "", threshold: int = 10, reward: float = 1.0
     ) -> None:  # type: ignore[misc]
         if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_reward"):
             return
