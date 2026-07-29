@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass, field
-from typing import List
 
 
 @dataclass
@@ -14,8 +13,8 @@ class RollResults20th:
     spec: str = ""
     cancel_ones: bool = False
     nightmare: int = 0
-    black_dice: List[int] = field(default_factory=list)
-    nightmare_dice: List[int] = field(default_factory=list)
+    black_dice: list[int] = field(default_factory=list)
+    nightmare_dice: list[int] = field(default_factory=list)
 
     successes: int = 0
     outcome: str = ""
@@ -79,8 +78,8 @@ def _emoji_for(die: int, diff: int, nightmare: bool = False) -> str:
     return "❌"
 
 
-def format_dice_emojis(roll: "RollResults20th") -> str:
-    parts: List[str] = []
+def format_dice_emojis(roll: RollResults20th) -> str:
+    parts: list[str] = []
     for d in roll.black_dice:
         parts.append(_emoji_for(d, roll.difficulty, False))
     if roll.nightmare_dice:
@@ -90,7 +89,9 @@ def format_dice_emojis(roll: "RollResults20th") -> str:
     return " ".join(parts) if parts else "—"
 
 
-def build_dice_embed(roll: "RollResults20th", author_name: str, author_icon: str | None = None, character_name: str | None = None, notes: str | None = None) -> dict:
+def build_dice_embed(
+    roll: RollResults20th, author_name: str, author_icon: str | None = None, character_name: str | None = None, notes: str | None = None
+) -> dict:
     title = f"Pool {roll.pool} | Diff {roll.difficulty}"
     if roll.nightmare:
         title += f" | Nightmare {roll.nightmare}"
@@ -118,11 +119,13 @@ def build_dice_embed(roll: "RollResults20th", author_name: str, author_icon: str
         fields.append({"name": "Notes", "value": notes, "inline": False})
 
     fields.append({"name": "Result", "value": f"{roll.successes} successes | {roll.outcome}", "inline": False})
-    fields.append({
-        "name": "\u200b",
-        "value": "[Website](https://realmofdarkness.app/) | [Commands](https://realmofdarkness.app/20th/commands/) | [Patreon](https://www.patreon.com/MiraiMiki)",
-        "inline": False,
-    })
+    fields.append(
+        {
+            "name": "\u200b",
+            "value": "[Website](https://realmofdarkness.app/) | [Commands](https://realmofdarkness.app/20th/commands/) | [Patreon](https://www.patreon.com/MiraiMiki)",
+            "inline": False,
+        }
+    )
 
     embed: dict = {
         "title": title,
@@ -167,13 +170,13 @@ def roll_d20() -> int:
     return int(secrets.randbelow(10) + 1)
 
 
-def roll_pool(count: int, difficulty: int, nightmare: int = 0) -> "RollResults20th":
+def roll_pool(count: int, difficulty: int, nightmare: int = 0) -> RollResults20th:
     if nightmare > count:
         raise ValueError("Nightmare dice cannot exceed pool size.")
     pool = max(1, count)
     regular_dice = pool - nightmare
-    black: List[int] = [roll_d20() for _ in range(regular_dice)]
-    nightmare_dice: List[int] = [roll_d20() for _ in range(nightmare)]
+    black: list[int] = [roll_d20() for _ in range(regular_dice)]
+    nightmare_dice: list[int] = [roll_d20() for _ in range(nightmare)]
     results = RollResults20th(pool=pool, difficulty=difficulty, black_dice=black, nightmare_dice=nightmare_dice)
     results.compute()
     return results

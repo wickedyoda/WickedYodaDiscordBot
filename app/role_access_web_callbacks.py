@@ -70,9 +70,7 @@ class RoleAccessWebCallbacks:
                     return {
                         "ok": False,
                         "error": str(
-                            validation.get("error")
-                            if isinstance(validation, dict)
-                            else "Discord could not validate that invite."
+                            validation.get("error") if isinstance(validation, dict) else "Discord could not validate that invite."
                         ),
                     }
 

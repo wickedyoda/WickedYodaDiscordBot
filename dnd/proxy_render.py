@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 
 def render_proxy_payload(proxy: dict, content: str) -> tuple[str, str, str]:
     display_name = proxy.get("name", "Proxy")

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import hashlib
-import uuid
 import json
 import re
 import urllib.parse
+import uuid
 
 import requests
 from bs4 import BeautifulSoup
@@ -98,9 +97,7 @@ def _find_beta_program_card_container(link_tag):
         if name not in container_names:
             continue
         apply_links = [
-            link
-            for link in candidate.find_all("a", href=True)
-            if "apply" in _clean_text(link.get_text(" ", strip=True)).casefold()
+            link for link in candidate.find_all("a", href=True) if "apply" in _clean_text(link.get_text(" ", strip=True)).casefold()
         ]
         if len(apply_links) != 1:
             continue

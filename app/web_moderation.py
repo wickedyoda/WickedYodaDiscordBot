@@ -123,7 +123,7 @@ def render_moderation_body(
             <tr>
               <td><strong>Moderation Log Channel</strong><div class='muted mono'>mod_log_channel_id</div></td>
               <td>{mod_log_select}</td>
-              <td class='muted mono'>{escape(str(effective_settings.get("mod_log_channel_id") or "")) or 'Use global default'}</td>
+              <td class='muted mono'>{escape(str(effective_settings.get("mod_log_channel_id") or "")) or "Use global default"}</td>
             </tr>
             <tr>
               <td><strong>Bad Word Filter</strong><div class='muted mono'>bad_words_enabled</div></td>
@@ -136,7 +136,7 @@ def render_moderation_body(
                 <textarea name='bad_words_list_json' rows='10' placeholder='one term per line'>{escape(bad_words_text)}</textarea>
                 <div class='muted' style='margin-top:8px;'>One word or phrase per line. Matching is case-insensitive.</div>
               </td>
-              <td class='muted'>{escape(', '.join(parse_bad_word_list(effective_settings.get("bad_words_list_json"))) or 'No blocked words configured.')}</td>
+              <td class='muted'>{escape(", ".join(parse_bad_word_list(effective_settings.get("bad_words_list_json"))) or "No blocked words configured.")}</td>
             </tr>
             <tr>
               <td><strong>Warning Window</strong><div class='muted mono'>bad_words_warning_window_hours</div></td>

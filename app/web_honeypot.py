@@ -24,9 +24,7 @@ HONEYPOT_ENABLED_OPTIONS = [
     {"value": "0", "label": "Disabled"},
 ]
 
-HONEYPOT_DELETE_MESSAGE_DAY_OPTIONS = [
-    {"value": str(value), "label": f"{value} day(s)"} for value in range(0, 6)
-]
+HONEYPOT_DELETE_MESSAGE_DAY_OPTIONS = [{"value": str(value), "label": f"{value} day(s)"} for value in range(0, 6)]
 
 HONEYPOT_TIMEOUT_HOUR_OPTIONS = [
     {"value": str(value), "label": f"{value} hour(s)"} for value in (1, 2, 4, 8, 12, 24, 48, 72, 168, 336, 672)

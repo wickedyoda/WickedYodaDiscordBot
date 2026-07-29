@@ -14,6 +14,10 @@ Project wiki files live in [`wiki/`](wiki/).
 - [`wiki/Multi-Guild-and-Env.md`](wiki/Multi-Guild-and-Env.md) - multi-guild behavior and environment variable patterns
 - [`wiki/Web-Admin-Interface.md`](wiki/Web-Admin-Interface.md) - web GUI authentication, pages, and security controls
 - [`wiki/Security-Hardening.md`](wiki/Security-Hardening.md) - runtime and verification hardening details
+- [`wiki/Docker-and-Portainer-Deploy.md`](wiki/Docker-and-Portainer-Deploy.md) - container deployment, Portainer, and health checks
+- [`wiki/Environment-Variables.md`](wiki/Environment-Variables.md) - bot, web, and integration environment variables
+- [`wiki/Health-Checks-and-Readiness.md`](wiki/Health-Checks-and-Readiness.md) - readiness checks and startup verification
+- [`wiki/DnD-HowTo.md`](wiki/DnD-HowTo.md) - D&D 20th command workflows and story data model
 
 When adding or changing a bot command, update `wiki/Command-Reference.md` in the same pull request.
 
@@ -124,6 +128,10 @@ WEB_TLS_PORT=8081
 - `/dnd general`
 - `/dnd initiative`
 - `/dnd character`
+- `/dnd proxy`
+- `/dnd chronicle`
+- `/dnd xp`
+- `/dnd reward`
 - `/birthday set`
 - `/birthday view`
 - `/birthday upcoming`

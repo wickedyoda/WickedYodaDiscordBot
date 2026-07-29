@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import List, Optional
 
 import requests
 from bs4 import BeautifulSoup
 
 from app.discourse_api import (
-    DiscourseApiError,
-    DiscourseRateLimitError,
     build_discourse_headers,
     clean_discourse_text,
 )
@@ -20,9 +17,7 @@ DEFAULT_FORUM_ANNOUNCEMENT_BASE_URL = "https://forum.gl-inet.com"
 DEFAULT_FORUM_ANNOUNCEMENT_CATEGORY_PATH = "/c/announcement"
 DEFAULT_FORUM_ANNOUNCEMENT_REQUEST_TIMEOUT = 20
 FORUM_ANNOUNCEMENT_REQUEST_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/137.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
 )
 
 
@@ -64,7 +59,7 @@ def fetch_announcement_category_html(
     if not resolved_category.startswith("/"):
         resolved_category = f"/{resolved_category}"
     target_url = f"{resolved_base}{resolved_category}"
-    response = requests.get(
+    response = requests.get(  # nosec B113
         target_url,
         timeout=max(1, int(request_timeout or DEFAULT_FORUM_ANNOUNCEMENT_REQUEST_TIMEOUT)),
         headers={
@@ -82,15 +77,13 @@ def fetch_announcement_category_html(
     if response.status_code == 429:
         raise ForumAnnouncementRateLimitError("Forum announcement category page is rate-limited right now.")
     if response.status_code != 200:
-        raise ForumAnnouncementError(
-            f"Forum announcement category page returned HTTP {response.status_code}."
-        )
+        raise ForumAnnouncementError(f"Forum announcement category page returned HTTP {response.status_code}.")
     return response.text, target_url
 
 
-def parse_announcement_topics(page_html: str, source_url: str, max_results: int = 20) -> List[dict]:
+def parse_announcement_topics(page_html: str, source_url: str, max_results: int = 20) -> list[dict]:
     soup = BeautifulSoup(page_html, "html.parser")
-    results: List[dict] = []
+    results: list[dict] = []
     seen_topic_ids = set()
     for row in soup.select("tr.topic-list-item"):
         title_tag = row.select_one(".main-link a.title, a.title")
@@ -115,9 +108,7 @@ def parse_announcement_topics(page_html: str, source_url: str, max_results: int 
         last_posted_at = ""
         last_post_date_tag = row.select_one("td.activity .post-date, td.activity time, .last-posted-at time")
         if last_post_date_tag is not None:
-            last_posted_at = str(
-                last_post_date_tag.get("datetime") or last_post_date_tag.get_text(" ", strip=True) or ""
-            ).strip()
+            last_posted_at = str(last_post_date_tag.get("datetime") or last_post_date_tag.get_text(" ", strip=True) or "").strip()
         topic_url = f"{source_url.rstrip('/')}/t/{slug.strip('/')}/{topic_id}" if slug else f"{source_url.rstrip('/')}/t/{topic_id}"
         if topic_url == f"{source_url.rstrip('/')}/t//{topic_id}":
             topic_url = f"{source_url.rstrip('/')}/t/{topic_id}"
@@ -142,7 +133,7 @@ def resolve_announcement_web_target(guild_id: int, *, get_effective_guild_settin
     return enabled, channel_id
 
 
-def mark_announcement_topic_posted(conn, guild_id: int, topic_id: int, posted_at: Optional[str] = None) -> None:
+def mark_announcement_topic_posted(conn, guild_id: int, topic_id: int, posted_at: str | None = None) -> None:
     safe_guild_id = int(guild_id or 0)
     safe_topic_id = int(topic_id or 0)
     if safe_guild_id <= 0 or safe_topic_id <= 0:
@@ -162,7 +153,5 @@ def load_announcement_seen_topic_ids(conn, guild_id: int) -> set[int]:
     safe_guild_id = int(guild_id or 0)
     if safe_guild_id <= 0:
         return set()
-    rows = conn.execute(
-        "SELECT topic_id FROM discourse_announcement_seen WHERE guild_id = ?", (safe_guild_id,)
-    ).fetchall()
+    rows = conn.execute("SELECT topic_id FROM discourse_announcement_seen WHERE guild_id = ?", (safe_guild_id,)).fetchall()
     return {int(row["topic_id"]) for row in rows if row["topic_id"]}

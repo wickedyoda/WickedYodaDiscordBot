@@ -71,10 +71,10 @@ def render_role_access_body(
         rows.append(
             f"""
             <tr>
-              <td><span class="mono">{escape(code or 'n/a')}</span></td>
+              <td><span class="mono">{escape(code or "n/a")}</span></td>
               <td>{f"<a href='{escape(invite_url, quote=True)}' target='_blank' rel='noopener noreferrer'>{escape(invite_url)}</a>" if invite_url else "<span class='muted'>n/a</span>"}</td>
-              <td class="mono">{escape(invite_code or 'n/a')}</td>
-              <td>{escape(role_label)}<div class="muted mono">{escape(role_id or 'n/a')}</div></td>
+              <td class="mono">{escape(invite_code or "n/a")}</td>
+              <td>{escape(role_label)}<div class="muted mono">{escape(role_id or "n/a")}</div></td>
               <td>{escape(status.title())}</td>
               <td class="muted">
                 <div class="mono">{escape(created_at)}</div>

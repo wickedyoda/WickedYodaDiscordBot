@@ -23,14 +23,8 @@ def build_bad_word_warning_message(
             f"{warning_threshold} warning(s) within {warning_window_hours} hour(s)."
         )
     else:
-        action_note = (
-            f"This is warning {warning_count} of {warning_threshold} within "
-            f"{warning_window_hours} hour(s)."
-        )
-    return (
-        f"Your message in **{guild_name}** was removed for a blocked word or phrase: `{matched_term}`.\n"
-        f"{action_note}"
-    )
+        action_note = f"This is warning {warning_count} of {warning_threshold} within {warning_window_hours} hour(s)."
+    return f"Your message in **{guild_name}** was removed for a blocked word or phrase: `{matched_term}`.\n{action_note}"
 
 
 async def send_bad_word_warning_dm(
@@ -100,11 +94,14 @@ async def apply_bad_word_moderation(
             getattr(message.guild, "id", "unknown"),
         )
 
-    warning_count = count_recent_warnings(
-        message.guild.id,
-        message.author.id,
-        within_hours=warning_window_hours,
-    ) + 1
+    warning_count = (
+        count_recent_warnings(
+            message.guild.id,
+            message.author.id,
+            within_hours=warning_window_hours,
+        )
+        + 1
+    )
     action_taken = "warning_only"
     escalated = False
     if configured_action == BAD_WORD_ACTION_TIMEOUT and warning_count >= warning_threshold:

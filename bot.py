@@ -6422,9 +6422,9 @@ async def roll(
     preset_meaning = DICE_MEANING.get("d00" if preset == "d100" and result["sides"] == 100 else preset, "")
     rolls_text = ", ".join(str(value) for value in result["rolls"])
     result_expression = str(result["expression"])
-    display_preset = "d00 / percentile" if str(result_expression).startswith("1d100") else f'{result["count"]}d{result["sides"]}'
+    display_preset = "d00 / percentile" if str(result_expression).startswith("1d100") else f"{result['count']}d{result['sides']}"
     if result["modifier"]:
-        display_preset += f' {result["modifier"]:+d}'
+        display_preset += f" {result['modifier']:+d}"
     parts = [
         f"Preset: `{display_preset}`",
         f"Rolls: [{rolls_text}]",

@@ -536,11 +536,7 @@ class MemberActivityManager:
             guild = self.bot.get_guild(int(guild_id))
             if guild is None:
                 return {}
-            return {
-                user_id: member
-                for user_id in unique_user_ids
-                if (member := guild.get_member(user_id)) is not None
-            }
+            return {user_id: member for user_id in unique_user_ids if (member := guild.get_member(user_id)) is not None}
 
         future = asyncio.run_coroutine_threadsafe(self.resolve_member_activity_members_async(int(guild_id), unique_user_ids), loop)
         try:

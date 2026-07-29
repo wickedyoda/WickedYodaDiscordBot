@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 
 @dataclass
@@ -25,9 +24,9 @@ class InitiativeTracker:
     channel_id: int
     guild_id: int
     owner_id: int
-    characters: List[InitiativeCharacter] = field(default_factory=list)
+    characters: list[InitiativeCharacter] = field(default_factory=list)
     phase: str = "roll"
     round: int = 1
 
-    def ordered(self) -> List[InitiativeCharacter]:
+    def ordered(self) -> list[InitiativeCharacter]:
         return sorted(self.characters, key=lambda x: (-x.total, x.member_id))

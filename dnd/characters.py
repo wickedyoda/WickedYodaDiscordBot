@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from pathlib import Path
 
 _DND_CHAR_TABLE = """
 CREATE TABLE IF NOT EXISTS dnd_characters (
@@ -43,7 +42,9 @@ def save_character(db_path: str, guild_id: int, owner_id: int, splat: str, name:
 
 def delete_character(db_path: str, guild_id: int, owner_id: int, name: str) -> bool:
     with _get_conn(db_path) as conn:
-        cur = conn.execute("DELETE FROM dnd_characters WHERE guild_id=? AND owner_id=? AND name=?", (int(guild_id), int(owner_id), str(name)))
+        cur = conn.execute(
+            "DELETE FROM dnd_characters WHERE guild_id=? AND owner_id=? AND name=?", (int(guild_id), int(owner_id), str(name))
+        )
         return cur.rowcount > 0
 
 
@@ -55,7 +56,15 @@ def find_character(db_path: str, guild_id: int, owner_id: int, name: str) -> dic
         ).fetchone()
         if not row:
             return None
-        return {"id": row["id"], "guild_id": row["guild_id"], "owner_id": row["owner_id"], "splat": row["splat"], "name": row["name"], "data": json.loads(row["json"]), "updated_at": row["updated_at"]}
+        return {
+            "id": row["id"],
+            "guild_id": row["guild_id"],
+            "owner_id": row["owner_id"],
+            "splat": row["splat"],
+            "name": row["name"],
+            "data": json.loads(row["json"]),
+            "updated_at": row["updated_at"],
+        }
 
 
 def list_characters(db_path: str, guild_id: int, owner_id: int) -> list[dict]:

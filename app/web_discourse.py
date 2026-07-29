@@ -96,9 +96,9 @@ def render_discourse_body(
         feature_rows.append(
             f"""
             <tr>
-              <td><strong>{escape(option['label'])}</strong><div class='muted mono'>{escape(feature_key)}</div></td>
+              <td><strong>{escape(option["label"])}</strong><div class='muted mono'>{escape(feature_key)}</div></td>
               <td>{feature_select}</td>
-              <td class='muted mono'>{'enabled' if discourse_feature_enabled(effective_settings.get('discourse_features_json'), feature_key) else 'disabled'}</td>
+              <td class='muted mono'>{"enabled" if discourse_feature_enabled(effective_settings.get("discourse_features_json"), feature_key) else "disabled"}</td>
             </tr>
             """
         )
@@ -129,27 +129,27 @@ def render_discourse_body(
             <tr>
               <td><strong>Integration State</strong><div class='muted mono'>discourse_enabled</div></td>
               <td>{enabled_select}</td>
-              <td class='muted mono'>{escape(format_discourse_override_label(current_settings.get('discourse_enabled')))}</td>
+              <td class='muted mono'>{escape(format_discourse_override_label(current_settings.get("discourse_enabled")))}</td>
             </tr>
             <tr>
               <td><strong>Forum Base URL</strong><div class='muted mono'>discourse_base_url</div></td>
               <td><input type='text' name='discourse_base_url' value='{escape(current_base_url, quote=True)}' placeholder='https://forum.gl-inet.com' /></td>
-              <td class='muted mono'>{escape(effective_base_url or 'Not configured')}</td>
+              <td class='muted mono'>{escape(effective_base_url or "Not configured")}</td>
             </tr>
             <tr>
               <td><strong>API Username / Profile</strong><div class='muted mono'>discourse_api_username</div></td>
               <td><input type='text' name='discourse_api_username' value='{escape(current_username, quote=True)}' placeholder='forum-bot' /></td>
-              <td class='muted mono'>{escape(str(effective_settings.get('discourse_api_username') or '') or 'Not configured')}</td>
+              <td class='muted mono'>{escape(str(effective_settings.get("discourse_api_username") or "") or "Not configured")}</td>
             </tr>
             <tr>
               <td><strong>Profile Label</strong><div class='muted mono'>discourse_profile_name</div></td>
               <td><input type='text' name='discourse_profile_name' value='{escape(current_profile_name, quote=True)}' placeholder='GL.iNet Forum Bot' /></td>
-              <td class='muted mono'>{escape(effective_profile_name or 'Not configured')}</td>
+              <td class='muted mono'>{escape(effective_profile_name or "Not configured")}</td>
             </tr>
             <tr>
               <td><strong>API Key</strong><div class='muted mono'>discourse_api_key</div></td>
               <td>
-                <input type='password' name='discourse_api_key' value='' placeholder='{'Stored key will be kept if blank' if int(effective_settings.get('discourse_api_key_configured') or 0) > 0 else 'Paste a Discourse API key'}' />
+                <input type='password' name='discourse_api_key' value='' placeholder='{"Stored key will be kept if blank" if int(effective_settings.get("discourse_api_key_configured") or 0) > 0 else "Paste a Discourse API key"}' />
                 <label class='checkbox' style='margin-top:8px;'><input type='checkbox' name='discourse_api_key_clear' value='1' /> Clear stored API key</label>
               </td>
               <td class='muted mono'>{escape(api_key_status)}</td>
@@ -168,10 +168,10 @@ def render_discourse_body(
           <table>
             <thead><tr><th>Feature</th><th>Configured Value</th><th>Effective Value</th></tr></thead>
             <tbody>
-              {''.join(feature_rows)}
+              {"".join(feature_rows)}
             </tbody>
           </table>
-          <p class='muted' style='margin-top:10px;'>Effective feature set: {escape(discourse_features_summary(effective_settings.get('discourse_features_json')))}</p>
+          <p class='muted' style='margin-top:10px;'>Effective feature set: {escape(discourse_features_summary(effective_settings.get("discourse_features_json")))}</p>
         </div>
 
         <div style='margin-top:14px;'>

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import json
 import datetime
-from typing import List, Optional
+import json
 
 from dnd.chronicle_schema import _get_conn
 
@@ -10,7 +9,7 @@ _DEFAULT_TIMESTAMP = "1970-01-01T00:00:00"
 
 
 def _utc_now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return datetime.datetime.now(datetime.UTC).isoformat()
 
 
 def _ensure_guild(db_path: str, guild_id: int, owner_id: int = 0, name: str = "Chronicle") -> None:
@@ -23,7 +22,7 @@ def _ensure_guild(db_path: str, guild_id: int, owner_id: int = 0, name: str = "C
         conn.commit()
 
 
-def get_chronicle(db_path: str, guild_id: int) -> Optional[dict]:
+def get_chronicle(db_path: str, guild_id: int) -> dict | None:
     with _get_conn(db_path) as conn:
         row = conn.execute("SELECT * FROM dnd_chronicles WHERE guild_id = ?", (int(guild_id),)).fetchone()
         if not row:
@@ -83,11 +82,11 @@ def update_chronicle(db_path: str, guild_id: int, **fields) -> None:
         values.append(v)
     values.append(int(guild_id))
     with _get_conn(db_path) as conn:
-        conn.execute(f"UPDATE dnd_chronicles SET {', '.join(sets)} WHERE guild_id = ?", values)
+        conn.execute(f"UPDATE dnd_chronicles SET {', '.join(sets)} WHERE guild_id = ?", values)  # nosec B608
         conn.commit()
 
 
-def list_members(db_path: str, guild_id: int) -> List[dict]:
+def list_members(db_path: str, guild_id: int) -> list[dict]:
     with _get_conn(db_path) as conn:
         rows = conn.execute("SELECT * FROM dnd_chronicle_members WHERE guild_id = ?", (int(guild_id),)).fetchall()
         return [
@@ -105,7 +104,16 @@ def list_members(db_path: str, guild_id: int) -> List[dict]:
         ]
 
 
-def upsert_member(db_path: str, guild_id: int, user_id: int, nickname: str = "", avatar_url: str = "", admin: bool = False, storyteller: bool = False, default_character: str = "") -> None:
+def upsert_member(
+    db_path: str,
+    guild_id: int,
+    user_id: int,
+    nickname: str = "",
+    avatar_url: str = "",
+    admin: bool = False,
+    storyteller: bool = False,
+    default_character: str = "",
+) -> None:
     _ensure_guild(db_path, guild_id)
     with _get_conn(db_path) as conn:
         conn.execute(
@@ -118,6 +126,7 @@ def upsert_member(db_path: str, guild_id: int, user_id: int, nickname: str = "",
 
 # ---- XP helpers ----
 
+
 def add_xp(db_path: str, guild_id: int, user_id: int, amount: float, reason: str = "") -> None:
     if amount == 0:
         return
@@ -125,8 +134,7 @@ def add_xp(db_path: str, guild_id: int, user_id: int, amount: float, reason: str
     user_id = int(user_id)
     with _get_conn(db_path) as conn:
         conn.execute(
-            "INSERT INTO dnd_xp_pools(guild_id, user_id, pool) VALUES(?,?,?) "
-            "ON CONFLICT(guild_id, user_id) DO UPDATE SET pool=pool+?",
+            "INSERT INTO dnd_xp_pools(guild_id, user_id, pool) VALUES(?,?,?) ON CONFLICT(guild_id, user_id) DO UPDATE SET pool=pool+?",
             (guild_id, user_id, amount, amount),
         )
         conn.execute(
@@ -142,7 +150,7 @@ def get_xp_balance(db_path: str, guild_id: int, user_id: int) -> float:
         return float(row["pool"]) if row else 0.0
 
 
-def list_xp_entries(db_path: str, guild_id: int, user_id: int, limit: int = 50) -> List[dict]:
+def list_xp_entries(db_path: str, guild_id: int, user_id: int, limit: int = 50) -> list[dict]:
     with _get_conn(db_path) as conn:
         rows = conn.execute(
             "SELECT id, guild_id, user_id, amount, reason, created_at FROM dnd_xp_entries WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT ?",
@@ -152,6 +160,7 @@ def list_xp_entries(db_path: str, guild_id: int, user_id: int, limit: int = 50) 
 
 
 # ---- Reward helpers ----
+
 
 def create_reward_rule(db_path: str, guild_id: int, name: str = "Reward Rule") -> dict:
     guild_id = int(guild_id)
@@ -166,7 +175,7 @@ def create_reward_rule(db_path: str, guild_id: int, name: str = "Reward Rule") -
     return {"id": rule_id, "name": name}
 
 
-def upsert_reward_tier(db_path: str, rule_id: int, idx: int = 0, threshold: int = 1, reward: float = 1) -> None:
+def upsert_reward_tier(db_path: str, rule_id: int, idx: int = 0, threshold: int = 1, reward: float = 1.0) -> None:
     with _get_conn(db_path) as conn:
         conn.execute(
             "INSERT INTO dnd_reward_tiers(rule_id, idx, threshold, reward) VALUES(?,?,?,?) "
@@ -176,23 +185,25 @@ def upsert_reward_tier(db_path: str, rule_id: int, idx: int = 0, threshold: int 
         conn.commit()
 
 
-def list_reward_rules(db_path: str, guild_id: int) -> List[dict]:
+def list_reward_rules(db_path: str, guild_id: int) -> list[dict]:
     with _get_conn(db_path) as conn:
         rows = conn.execute("SELECT * FROM dnd_reward_rules WHERE guild_id=?", (int(guild_id),)).fetchall()
         return [dict(r) for r in rows]
 
 
-def evaluate_rewards(db_path: str, guild_id: int, user_id: int) -> List[dict]:
+def evaluate_rewards(db_path: str, guild_id: int, user_id: int) -> list[dict]:
     guild_id = int(guild_id)
     user_id = int(user_id)
     rules = list_reward_rules(db_path, guild_id)
-    results: List[dict] = []
+    results: list[dict] = []
     for rule in rules:
         if not rule.get("enabled", 1):
             continue
         threshold = max(1, rule.get("period_count", 7))
         with _get_conn(db_path) as conn:
-            tier_row = conn.execute("SELECT threshold, reward FROM dnd_reward_tiers WHERE rule_id=? ORDER BY idx ASC LIMIT 1", (rule["id"],)).fetchone()
+            tier_row = conn.execute(
+                "SELECT threshold, reward FROM dnd_reward_tiers WHERE rule_id=? ORDER BY idx ASC LIMIT 1", (rule["id"],)
+            ).fetchone()
             if not tier_row:
                 continue
             current_count = conn.execute(
@@ -201,11 +212,13 @@ def evaluate_rewards(db_path: str, guild_id: int, user_id: int) -> List[dict]:
             ).fetchone()
             count = int(current_row["count"]) if (current_row := current_count) else 0
         reward_threshold = int(tier_row["threshold"])
-        results.append({
-            "id": rule["id"],
-            "name": rule["name"],
-            "threshold": reward_threshold,
-            "reward": float(tier_row["reward"]),
-            "current_count": count,
-        })
+        results.append(
+            {
+                "id": rule["id"],
+                "name": rule["name"],
+                "threshold": reward_threshold,
+                "reward": float(tier_row["reward"]),
+                "current_count": count,
+            }
+        )
     return results

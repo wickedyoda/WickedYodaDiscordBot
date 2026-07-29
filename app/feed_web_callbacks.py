@@ -175,9 +175,7 @@ class FeedWebCallbacks:
                 guild = self.bot.get_guild(safe_guild_id)
                 target_channel = guild.get_channel(target_channel_id) if guild else None
                 target_channel_name = (
-                    f"#{target_channel.name}"
-                    if isinstance(target_channel, self.discord.TextChannel)
-                    else str(target_channel_id)
+                    f"#{target_channel.name}" if isinstance(target_channel, self.discord.TextChannel) else str(target_channel_id)
                 )
                 self.create_or_update_youtube_subscription(
                     safe_guild_id,
@@ -212,9 +210,7 @@ class FeedWebCallbacks:
                 guild = self.bot.get_guild(safe_guild_id)
                 target_channel = guild.get_channel(target_channel_id) if guild else None
                 target_channel_name = (
-                    f"#{target_channel.name}"
-                    if isinstance(target_channel, self.discord.TextChannel)
-                    else str(target_channel_id)
+                    f"#{target_channel.name}" if isinstance(target_channel, self.discord.TextChannel) else str(target_channel_id)
                 )
                 if not self.update_youtube_subscription(
                     subscription_id,
