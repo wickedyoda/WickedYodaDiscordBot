@@ -14,6 +14,7 @@ RUN apt-get update \
 COPY bot.py ./
 COPY core /app/core
 COPY webui /app/webui
+COPY dnd /app/dnd
 COPY scripts/entrypoint.sh /app/entrypoint.sh
 RUN mkdir -p /app/data /logs \
     && useradd --create-home --shell /usr/sbin/nologin botuser \
