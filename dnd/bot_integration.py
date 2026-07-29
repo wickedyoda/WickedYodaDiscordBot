@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 from typing import Any
 
 import discord
@@ -28,6 +29,7 @@ from dnd.proxy_service import (
 )
 
 bound: dict[str, Any] | None = None
+log = logging.getLogger(__name__)
 
 DND_DB_PATH = "/app/data/dnd.db"
 
@@ -163,8 +165,8 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
                 reason=reason,
                 success=success,
             )
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Discord interaction log failed: %s", exc)
 
     async def _send(interaction: Any, content: str, *, ephemeral: bool = True) -> None:
         if reply_ephemeral is not None:
