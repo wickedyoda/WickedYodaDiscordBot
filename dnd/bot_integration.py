@@ -129,27 +129,67 @@ def _sheet_fields_for_splat(splat: str, name: str, data: dict) -> list[str]:
     return fields
 
 
+def _load_dnd_category_id(guild_id: int) -> int:
+    try:
+        settings = ACTION_STORE.load_guild_settings(guild_id)
+        return int((settings or {}).get("dnd_category_id") or 0)
+    except Exception:
+        return 0
+
+
+async def _enforce_dnd_scope(interaction: Any) -> bool:
+    if not getattr(interaction, "guild", None) or not getattr(interaction.guild, "id", None):
+        return True
+    guild_id = int(interaction.guild.id)
+    allowed_category_id = _load_dnd_category_id(guild_id)
+    if not allowed_category_id:
+        return True
+    channel_category_id = int(getattr(getattr(interaction, "channel", None), "category_id", 0) or 0)
+    if not channel_category_id:
+        if reply_ephemeral:
+            await reply_ephemeral(interaction, "D&D commands are only allowed inside the configured category.")
+        return False
+    return channel_category_id == allowed_category_id
+
+
 def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> None:
     bound: dict[str, Any] = {
         "reply_ephemeral": None,
         "log_interaction": None,
         "ensure_interaction_command_access": None,
+        "save_guild_settings": None,
     }
     if helpers:
-        bound.update(helpers)
+        bound.update({k: v for k, v in helpers.items() if k in bound})
     reply_ephemeral = bound["reply_ephemeral"]
     log_interaction = bound["log_interaction"]
     ensure_interaction_command_access = bound["ensure_interaction_command_access"]
+    save_gnd = bound["save_guild_settings"]
 
     async def _log(interaction: Any, action: str, reason: str = "", *, success: bool = True) -> None:
         if log_interaction is None:
             return
-        await log_interaction(
-            {"guild": getattr(interaction, "guild", None), "user": getattr(interaction, "user", None)},
-            action=action,
-            reason=reason,
-            success=success,
-        )
+        try:
+            await log_interaction(
+                interaction,
+                action=action,
+                reason=reason,
+                success=success,
+            )
+        except Exception:
+            pass
+
+    def _save_dnd_scope(guild_id: int, category_id: int) -> None:
+        if save_gnd is None:
+            return
+        try:
+            save_gnd(
+                guild_id,
+                payload={"dnd_category_id": int(category_id or 0)},
+                actor_email="",
+            )
+        except Exception:
+            pass
 
     dnd_group = bot.tree.get_command("dnd")
     if dnd_group is None:
@@ -185,6 +225,8 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
         character: str | None = None,
         notes: str | None = None,
     ) -> None:  # type: ignore[misc]
+        if not await _enforce_dnd_scope(interaction):
+            return
         if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_roll"):
             return
         try:
@@ -228,6 +270,8 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
         difficulty: int | None = None,
         notes: str | None = None,
     ) -> None:  # type: ignore[misc]
+        if not await _enforce_dnd_scope(interaction):
+            return
         if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_general"):
             return
         try:
@@ -249,6 +293,8 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
     async def dice_initiative(
         interaction: discord.Interaction, action: str = "new", dex_wits: int = 0, character: str | None = None, notes: str | None = None
     ) -> None:  # type: ignore[misc]
+        if not await _enforce_dnd_scope(interaction):
+            return
         if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_initiative"):
             return
         if not interaction.guild:
@@ -304,6 +350,8 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
         name: str | None = None,
         payload: str | None = None,
     ) -> None:  # type: ignore[misc]
+        if not await _enforce_dnd_scope(interaction):
+            return
         await _run_character_command(interaction, action=action, splat=splat, name=name, payload=payload)
 
     @app_commands.describe(
@@ -322,10 +370,14 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
         avatar_url: str = "",
         message: str | None = None,
     ) -> None:  # type: ignore[misc]
+        if not await _enforce_dnd_scope(interaction):
+            return
         await _run_proxy_command(interaction, action=action, name=name, template=template, avatar_url=avatar_url, message=message)
 
     @dnd_group.command(name="chronicle", description="Chronicle server helpers.")
     async def dice_chronicle(interaction: discord.Interaction, action: str = "create", name: str = "Chronicle") -> None:  # type: ignore[misc]
+        if not await _enforce_dnd_scope(interaction):
+            return
         if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_chronicle"):
             return
         if not interaction.guild:
@@ -367,6 +419,8 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
 
     @dnd_group.command(name="xp", description="Experience point helpers.")
     async def dice_xp(interaction: discord.Interaction, action: str = "add", amount: float = 1.0, reason: str = "") -> None:  # type: ignore[misc]
+        if not await _enforce_dnd_scope(interaction):
+            return
         if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_xp"):
             return
         if not interaction.guild:
@@ -397,6 +451,8 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
     async def dice_reward(
         interaction: discord.Interaction, action: str = "status", rule_name: str = "", threshold: int = 10, reward: float = 1.0
     ) -> None:  # type: ignore[misc]
+        if not await _enforce_dnd_scope(interaction):
+            return
         if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_reward"):
             return
         if not interaction.guild:
@@ -438,6 +494,33 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
         else:
             await interaction.response.send_message("Use `create`, `status`, or `ledger`.", ephemeral=True)
 
+    @dnd_group.command(name="scope-set", description="Restrict D&D commands to a Discord category.")
+    @app_commands.describe(category="Discord category to allow D&D commands in, including its sub-channels/threads.")
+    async def dice_scope_set(interaction: discord.Interaction, category: discord.CategoryChannel) -> None:  # type: ignore[misc]
+        if not interaction.guild or category.guild is None or category.guild.id != interaction.guild.id:
+            if reply_ephemeral:
+                await reply_ephemeral(interaction, "Choose a category from this server.")
+            return
+        _save_dnd_scope(int(interaction.guild.id), int(category.id))
+        if reply_ephemeral:
+            await reply_ephemeral(interaction, f"D&D commands are now restricted to `{category.name}`.")
+
+    @dnd_group.command(name="scope-get", description="Show the allowed D&D category, if set.")
+    async def dice_scope_get(interaction: discord.Interaction) -> None:  # type: ignore[misc]
+        allowed_category_id = _load_dnd_category_id(int(interaction.guild.id) if interaction.guild else 0)
+        if not allowed_category_id:
+            message = "D&D commands are allowed everywhere."
+        else:
+            message = f"D&D category restriction is set: {allowed_category_id}."
+        if reply_ephemeral:
+            await reply_ephemeral(interaction, message)
+
+    @dnd_group.command(name="scope-clear", description="Remove the D&D category restriction.")
+    async def dice_scope_clear(interaction: discord.Interaction) -> None:  # type: ignore[misc]
+        _save_dnd_scope(int(interaction.guild.id) if interaction.guild else 0, 0)
+        if reply_ephemeral:
+            await reply_ephemeral(interaction, "D&D category restriction cleared.")
+
 
 def _end_tracker(db_path: str, channel_id: int) -> None:
     import sqlite3
@@ -447,7 +530,7 @@ def _end_tracker(db_path: str, channel_id: int) -> None:
 
 
 async def _run_character_command(interaction: Any, *, action: str, splat: str | None, name: str | None, payload: str | None) -> None:
-    reply_ephemeral = bound["reply_ephemeral"] if "bound" in globals() else None
+    reply_ephemeral = bound["reply_ephemeral"] if bound is not None else None
 
     if action != "show" and not getattr(interaction, "guild", None):
         if reply_ephemeral:
@@ -552,7 +635,7 @@ async def _run_character_command(interaction: Any, *, action: str, splat: str | 
 
 
 async def _run_proxy_command(interaction: Any, *, action: str, name: str, template: str, avatar_url: str, message: str | None) -> None:
-    reply_ephemeral = bound["reply_ephemeral"] if "bound" in globals() else None
+    reply_ephemeral = bound["reply_ephemeral"] if bound is not None else None
     if not getattr(interaction, "guild", None):
         if reply_ephemeral:
             await reply_ephemeral(interaction, "Guild context is required for proxies.")
