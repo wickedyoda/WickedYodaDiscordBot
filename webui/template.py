@@ -884,7 +884,8 @@ PAGE_TEMPLATE = """
               <button class="btn btn-primary w-100" type="submit">Send Reset Link</button>
             </form>
             <div class="mt-3 text-center">
-              <a href="{{ url_for('login') }}">Back to login</a>
+              <a href="{{ url_for('login') }}">Login</a>
+              <a href="{{ url_for('forgot_password') }}">Forgot Password?</a>
             </div>
           </div>
         </div>
