@@ -82,7 +82,7 @@ def update_chronicle(db_path: str, guild_id: int, **fields) -> None:
         values.append(v)
     values.append(int(guild_id))
     with _get_conn(db_path) as conn:
-        conn.execute(f"UPDATE dnd_chronicles SET {', '.join(sets)} WHERE guild_id = ?", values)  # nosec B608
+        conn.execute(f"""UPDATE dnd_chronicles SET {", ".join(sets)} WHERE guild_id = ?""", values)  # nosec B608
         conn.commit()
 
 
@@ -210,7 +210,7 @@ def evaluate_rewards(db_path: str, guild_id: int, user_id: int) -> list[dict]:
                 "SELECT COUNT(*) AS count FROM dnd_xp_entries WHERE guild_id=? AND user_id=? AND created_at>=date('now', ? || ' days')",
                 (guild_id, user_id, f"-{threshold}"),
             ).fetchone()
-            count = int(current_row["count"]) if (current_row := current_count) else 0
+            count = int(current_count["count"]) if current_count else 0
         reward_threshold = int(tier_row["threshold"])
         results.append(
             {

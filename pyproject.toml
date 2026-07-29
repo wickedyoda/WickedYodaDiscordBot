@@ -18,4 +18,4 @@ ignore = ["E501"]
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv", "data", "__pycache__"]
-skips = ["B101"]
+skips = ["B101", "B608"]

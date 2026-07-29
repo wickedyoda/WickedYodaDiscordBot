@@ -155,6 +155,23 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
     if dnd_group is None:
         raise RuntimeError("Missing `/dnd` application group.")
 
+    async def _send(interaction: Any, content: str, *, ephemeral: bool = True) -> None:
+        if reply_ephemeral is not None:
+            await reply_ephemeral(interaction, content)
+            return
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(content, ephemeral=ephemeral)
+            else:
+                await interaction.response.send_message(content, ephemeral=ephemeral)
+        except discord.NotFound:
+            try:
+                await interaction.followup.send(content, ephemeral=ephemeral)
+            except discord.HTTPException:
+                pass
+        except discord.HTTPException:
+            pass
+
     @dnd_group.command(name="roll", description="20th Anniversary Edition dice roll.")
     async def dice_roll(
         interaction: discord.Interaction,
