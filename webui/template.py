@@ -2906,6 +2906,11 @@ PAGE_TEMPLATE = """
                 <input class="form-control" id="account_email" name="email" type="email" value="{{ account_user.email or '' }}" required>
               </div>
               <div class="mt-3">
+                <label class="form-label" for="account_discord_user_id">Discord User ID (optional)</label>
+                <input class="form-control" id="account_discord_user_id" name="discord_user_id" type="number" placeholder="123456789012345678" value="{{ account_user.discord_user_id or '' }}">
+                <div class="form-text">Optional public Discord account link for your web profile.</div>
+              </div>
+              <div class="mt-3">
                 <label class="form-label" for="account_profile_password">Current Password</label>
                 <input class="form-control" id="account_profile_password" name="current_password" type="password" required>
                 <div class="form-text">Required to change your email or name.</div>

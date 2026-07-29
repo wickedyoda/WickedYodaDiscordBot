@@ -493,7 +493,6 @@ class GuildStateManager:
                 "welcome_image_base64": merged["welcome_image_base64"],
                 "dnd_category_id": merged.get("dnd_category_id", 0),
                 "updated_at": updated_at,
-
                 "updated_by_email": actor_email or "unknown",
             }
             conn.execute(
