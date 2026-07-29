@@ -93,8 +93,7 @@ def render_members_body(
     role_filter_select_html = "".join(role_filter_options)
     role_action_select_html = "".join(role_action_options)
     duration_select_html = "".join(
-        f"<option value='{escape(value, quote=True)}'>{escape(label)}</option>"
-        for value, label in MEMBER_TIMEOUT_OPTIONS
+        f"<option value='{escape(value, quote=True)}'>{escape(label)}</option>" for value, label in MEMBER_TIMEOUT_OPTIONS
     )
 
     catalog_note = ""
@@ -151,7 +150,7 @@ def render_members_body(
             <tr>
               <td>
                 <strong>{escape(display_name)}</strong>
-                <div class='muted'>{escape(account_name or 'Unknown account')}</div>
+                <div class='muted'>{escape(account_name or "Unknown account")}</div>
                 <div class='muted mono'>{escape(member_id)}</div>
               </td>
               <td class='muted'>{escape(joined_label)}</td>
@@ -169,7 +168,7 @@ def render_members_body(
               <div class='members-mobile-head'>
                 <div>
                   <h3>{escape(display_name)}</h3>
-                  <p class='muted'>{escape(account_name or 'Unknown account')}</p>
+                  <p class='muted'>{escape(account_name or "Unknown account")}</p>
                   <p class='muted mono'>{escape(member_id)}</p>
                 </div>
                 <div class='members-mobile-state'>{escape(status_label)}</div>
@@ -184,9 +183,7 @@ def render_members_body(
         )
 
     if not member_rows:
-        member_rows.append(
-            "<tr><td colspan='5' class='muted'>No members matched the current filters.</td></tr>"
-        )
+        member_rows.append("<tr><td colspan='5' class='muted'>No members matched the current filters.</td></tr>")
         member_cards.append("<div class='card members-mobile-card'><p class='muted'>No members matched the current filters.</p></div>")
 
     page_links = []
@@ -252,18 +249,18 @@ def render_members_body(
             <tr><th>Member</th><th>Joined</th><th>Current Roles</th><th>Status</th><th>Actions</th></tr>
           </thead>
           <tbody>
-            {''.join(member_rows)}
+            {"".join(member_rows)}
           </tbody>
         </table>
       </div>
 
       <div class='members-mobile-list'>
-        {''.join(member_cards)}
+        {"".join(member_cards)}
       </div>
 
       <div class='members-pagination'>
         {prev_link}
-        {''.join(page_links)}
+        {"".join(page_links)}
         {next_link}
         <form method='get' class='members-jump-form'>
           <input type='hidden' name='q' value='{escape(current_query, quote=True)}' />

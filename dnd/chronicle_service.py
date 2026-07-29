@@ -104,7 +104,16 @@ def list_members(db_path: str, guild_id: int) -> list[dict]:
         ]
 
 
-def upsert_member(db_path: str, guild_id: int, user_id: int, nickname: str = "", avatar_url: str = "", admin: bool = False, storyteller: bool = False, default_character: str = "") -> None:
+def upsert_member(
+    db_path: str,
+    guild_id: int,
+    user_id: int,
+    nickname: str = "",
+    avatar_url: str = "",
+    admin: bool = False,
+    storyteller: bool = False,
+    default_character: str = "",
+) -> None:
     _ensure_guild(db_path, guild_id)
     with _get_conn(db_path) as conn:
         conn.execute(
@@ -117,6 +126,7 @@ def upsert_member(db_path: str, guild_id: int, user_id: int, nickname: str = "",
 
 # ---- XP helpers ----
 
+
 def add_xp(db_path: str, guild_id: int, user_id: int, amount: float, reason: str = "") -> None:
     if amount == 0:
         return
@@ -124,8 +134,7 @@ def add_xp(db_path: str, guild_id: int, user_id: int, amount: float, reason: str
     user_id = int(user_id)
     with _get_conn(db_path) as conn:
         conn.execute(
-            "INSERT INTO dnd_xp_pools(guild_id, user_id, pool) VALUES(?,?,?) "
-            "ON CONFLICT(guild_id, user_id) DO UPDATE SET pool=pool+?",
+            "INSERT INTO dnd_xp_pools(guild_id, user_id, pool) VALUES(?,?,?) ON CONFLICT(guild_id, user_id) DO UPDATE SET pool=pool+?",
             (guild_id, user_id, amount, amount),
         )
         conn.execute(
@@ -151,6 +160,7 @@ def list_xp_entries(db_path: str, guild_id: int, user_id: int, limit: int = 50) 
 
 
 # ---- Reward helpers ----
+
 
 def create_reward_rule(db_path: str, guild_id: int, name: str = "Reward Rule") -> dict:
     guild_id = int(guild_id)
@@ -191,7 +201,9 @@ def evaluate_rewards(db_path: str, guild_id: int, user_id: int) -> list[dict]:
             continue
         threshold = max(1, rule.get("period_count", 7))
         with _get_conn(db_path) as conn:
-            tier_row = conn.execute("SELECT threshold, reward FROM dnd_reward_tiers WHERE rule_id=? ORDER BY idx ASC LIMIT 1", (rule["id"],)).fetchone()
+            tier_row = conn.execute(
+                "SELECT threshold, reward FROM dnd_reward_tiers WHERE rule_id=? ORDER BY idx ASC LIMIT 1", (rule["id"],)
+            ).fetchone()
             if not tier_row:
                 continue
             current_count = conn.execute(
@@ -200,11 +212,13 @@ def evaluate_rewards(db_path: str, guild_id: int, user_id: int) -> list[dict]:
             ).fetchone()
             count = int(current_row["count"]) if (current_row := current_count) else 0
         reward_threshold = int(tier_row["threshold"])
-        results.append({
-            "id": rule["id"],
-            "name": rule["name"],
-            "threshold": reward_threshold,
-            "reward": float(tier_row["reward"]),
-            "current_count": count,
-        })
+        results.append(
+            {
+                "id": rule["id"],
+                "name": rule["name"],
+                "threshold": reward_threshold,
+                "reward": float(tier_row["reward"]),
+                "current_count": count,
+            }
+        )
     return results

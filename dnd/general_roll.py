@@ -22,8 +22,11 @@ def roll_many(dice: int, sides: int) -> DiceSet:
     return result
 
 
-def parse_sets(set1: str | None = None, set2: str | None = None, set3: str | None = None, set4: str | None = None, set5: str | None = None) -> dict[int, DiceSet]:
+def parse_sets(
+    set1: str | None = None, set2: str | None = None, set3: str | None = None, set4: str | None = None, set5: str | None = None
+) -> dict[int, DiceSet]:
     import re
+
     raw = [s for s in [set1, set2, set3, set4, set5] if s]
     sets: dict[int, DiceSet] = {}
     for item in raw:
@@ -44,18 +47,27 @@ def parse_sets(set1: str | None = None, set2: str | None = None, set3: str | Non
     return sets
 
 
-def build_general_embed(sets: dict[int, DiceSet], modifier: int | None, difficulty: int | None, notes: str | None, author_name: str, author_icon: str | None = None) -> dict:
+def build_general_embed(
+    sets: dict[int, DiceSet],
+    modifier: int | None,
+    difficulty: int | None,
+    notes: str | None,
+    author_name: str,
+    author_icon: str | None = None,
+) -> dict:
     total = 0
     fields = []
     for s in sets.values():
         s.results = [roll_one(s.sides) for _ in range(s.dice)]
         total += sum(s.results)
         preview = " ".join(str(x) for x in s.results)
-        fields.append({
-            "name": f"{s.dice}d{s.sides}",
-            "value": f"```css\n{preview}\n```",
-            "inline": True,
-        })
+        fields.append(
+            {
+                "name": f"{s.dice}d{s.sides}",
+                "value": f"```css\n{preview}\n```",
+                "inline": True,
+            }
+        )
     if modifier:
         total += int(modifier)
         fields.append({"name": "Modifier", "value": f"```css\n{modifier}\n```", "inline": True})
@@ -73,11 +85,13 @@ def build_general_embed(sets: dict[int, DiceSet], modifier: int | None, difficul
             color = 0x66FF33
 
     fields.append({"name": "Result", "value": result_value, "inline": False})
-    fields.append({
-        "name": "\u200b",
-        "value": "[Website](https://realmofdarkness.app/) | [Commands](https://realmofdarkness.app/20th/commands/) | [Patreon](https://www.patreon.com/MiraiMiki)",
-        "inline": False,
-    })
+    fields.append(
+        {
+            "name": "\u200b",
+            "value": "[Website](https://realmofdarkness.app/) | [Commands](https://realmofdarkness.app/20th/commands/) | [Patreon](https://www.patreon.com/MiraiMiki)",
+            "inline": False,
+        }
+    )
 
     embed: dict = {
         "title": "General Roll",

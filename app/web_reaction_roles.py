@@ -9,6 +9,8 @@ REACTION_ROLE_STATUS_OPTIONS = (
     {"value": "paused", "label": "Paused"},
     {"value": "disabled", "label": "Disabled"},
 )
+
+
 def process_reaction_roles_submission(*, form, on_manage_reaction_roles, actor_email: str, selected_guild_id: str):
     messages: list[tuple[str, str]] = []
     if not callable(on_manage_reaction_roles):
@@ -35,6 +37,8 @@ def process_reaction_roles_submission(*, form, on_manage_reaction_roles, actor_e
 
     messages.append((str(response.get("message") or "Reaction role mappings updated."), "success"))
     return response, messages
+
+
 def render_reaction_roles_body(
     *,
     guild_name: str,

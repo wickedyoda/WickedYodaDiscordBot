@@ -332,7 +332,9 @@ def _ensure_youtube_subscriptions_table(db_path: str) -> None:
         for column, statement in migrations.items():
             if column not in columns:
                 conn.execute(statement)
-        conn.execute("UPDATE youtube_subscriptions SET poll_interval_seconds = 300 WHERE poll_interval_seconds IS NULL OR poll_interval_seconds <= 0")
+        conn.execute(
+            "UPDATE youtube_subscriptions SET poll_interval_seconds = 300 WHERE poll_interval_seconds IS NULL OR poll_interval_seconds <= 0"
+        )
         conn.commit()
 
 
@@ -1930,7 +1932,9 @@ def create_app(
             password_changed_at=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
         )
     elif (
-        admin_password and not generated_one_time_admin_password and not check_password_hash(str(existing_admin_user.get("password_hash", "")), admin_password)
+        admin_password
+        and not generated_one_time_admin_password
+        and not check_password_hash(str(existing_admin_user.get("password_hash", "")), admin_password)
     ):
         _upsert_user(
             db_path,
@@ -3241,7 +3245,9 @@ def create_app(
             status_checks=status_checks,
             status_log_name=status_log_path.name if status_log_path is not None else "n/a",
             status_log_dir=str(log_dir),
-            status_log_tail=_tail_file(status_log_path, line_limit=120) if status_log_path is not None else "No status log file configured.",
+            status_log_tail=_tail_file(status_log_path, line_limit=120)
+            if status_log_path is not None
+            else "No status log file configured.",
         )
 
     @app.get("/admin/uptime-monitors")
@@ -3340,10 +3346,16 @@ def create_app(
         observability_payload = {
             "sampled_at": str(snapshot.get("sampled_at", "")).replace("T", " ").replace("+00:00", ""),
             "uptime": _format_uptime(snapshot.get("uptime_seconds", 0)),
-            "process_cpu": f"{float(snapshot['process_cpu_percent']):.2f}%" if isinstance(snapshot.get("process_cpu_percent"), (int, float)) else "n/a",
+            "process_cpu": f"{float(snapshot['process_cpu_percent']):.2f}%"
+            if isinstance(snapshot.get("process_cpu_percent"), (int, float))
+            else "n/a",
             "rss": _format_bytes(snapshot.get("rss_bytes")),
-            "io_read": f"{_format_bytes(snapshot.get('io_read_rate_bps'))}/s" if isinstance(snapshot.get("io_read_rate_bps"), (int, float)) else "n/a",
-            "io_write": f"{_format_bytes(snapshot.get('io_write_rate_bps'))}/s" if isinstance(snapshot.get("io_write_rate_bps"), (int, float)) else "n/a",
+            "io_read": f"{_format_bytes(snapshot.get('io_read_rate_bps'))}/s"
+            if isinstance(snapshot.get("io_read_rate_bps"), (int, float))
+            else "n/a",
+            "io_write": f"{_format_bytes(snapshot.get('io_write_rate_bps'))}/s"
+            if isinstance(snapshot.get("io_write_rate_bps"), (int, float))
+            else "n/a",
         }
         rows = _build_observability_rows(snapshot)
         return _render_page(
@@ -3375,7 +3387,9 @@ def create_app(
                     flash(str(result.get("message", "Bot profile updated.")), "success")
                 else:
                     flash(
-                        str(result.get("error", "Failed to update bot profile.")) if isinstance(result, dict) else "Failed to update bot profile.",
+                        str(result.get("error", "Failed to update bot profile."))
+                        if isinstance(result, dict)
+                        else "Failed to update bot profile.",
                         "danger",
                     )
             elif action == "avatar":
@@ -3407,7 +3421,9 @@ def create_app(
                             flash(str(result.get("message", "Bot avatar updated.")), "success")
                         else:
                             flash(
-                                str(result.get("error", "Failed to update bot avatar.")) if isinstance(result, dict) else "Failed to update bot avatar.",
+                                str(result.get("error", "Failed to update bot avatar."))
+                                if isinstance(result, dict)
+                                else "Failed to update bot avatar.",
                                 "danger",
                             )
             else:
@@ -3572,7 +3588,9 @@ def create_app(
             result = _call_pick_random_user(selected_guild_id, role_id_value)
             if not isinstance(result, dict) or not result.get("ok"):
                 flash(
-                    str(result.get("error") or "Failed to pick a random user.") if isinstance(result, dict) else "Failed to pick a random user.",
+                    str(result.get("error") or "Failed to pick a random user.")
+                    if isinstance(result, dict)
+                    else "Failed to pick a random user.",
                     "danger",
                 )
         return _render_page(
@@ -3629,7 +3647,9 @@ def create_app(
         payload = _call_export_member_activity(selected_guild_id, selected_role_id)
         if not isinstance(payload, dict) or not payload.get("ok"):
             flash(
-                str(payload.get("error") or "Failed to export member activity.") if isinstance(payload, dict) else "Failed to export member activity.",
+                str(payload.get("error") or "Failed to export member activity.")
+                if isinstance(payload, dict)
+                else "Failed to export member activity.",
                 "danger",
             )
             return redirect(url_for("member_activity_page"))
@@ -4304,7 +4324,9 @@ def create_app(
                     raise ValueError("Tag response JSON must be an object.")
                 result = _call_save_tag_responses(payload, str(session.get("user", "")), selected_guild_id)
                 if not isinstance(result, dict) or not result.get("ok"):
-                    raise ValueError(str(result.get("error", "Failed to save tag responses.")) if isinstance(result, dict) else "Invalid save response.")
+                    raise ValueError(
+                        str(result.get("error", "Failed to save tag responses.")) if isinstance(result, dict) else "Invalid save response."
+                    )
                 flash(str(result.get("message", "Tag responses updated.")), "success")
             except Exception as exc:
                 flash(f"Invalid tag JSON: {exc}", "danger")
@@ -4315,7 +4337,9 @@ def create_app(
             mapping = response.get("mapping", {}) or {}
         else:
             flash(
-                str(response.get("error", "Failed to load tag responses.")) if isinstance(response, dict) else "Failed to load tag responses.",
+                str(response.get("error", "Failed to load tag responses."))
+                if isinstance(response, dict)
+                else "Failed to load tag responses.",
                 "danger",
             )
         tag_json = json.dumps(mapping, indent=2, sort_keys=True)
@@ -4348,7 +4372,9 @@ def create_app(
                 flash(str(result.get("message", "Guild settings updated.")), "success")
             else:
                 flash(
-                    str(result.get("error", "Failed to update guild settings.")) if isinstance(result, dict) else "Failed to update guild settings.",
+                    str(result.get("error", "Failed to update guild settings."))
+                    if isinstance(result, dict)
+                    else "Failed to update guild settings.",
                     "danger",
                 )
 
@@ -4389,7 +4415,9 @@ def create_app(
                 flash("Moderation settings updated.", "success")
             else:
                 flash(
-                    str(result.get("error", "Failed to update moderation settings.")) if isinstance(result, dict) else "Failed to update moderation settings.",
+                    str(result.get("error", "Failed to update moderation settings."))
+                    if isinstance(result, dict)
+                    else "Failed to update moderation settings.",
                     "danger",
                 )
 
@@ -4495,7 +4523,9 @@ def create_app(
         guild_ids = [int(value) for value in request.form.getlist("guild_ids") if str(value).isdigit()]
         allowed_users = {str(user.get("email", "")).strip().lower() for user in _list_users(db_path)}
         user_emails = [
-            email.strip().lower() for email in request.form.getlist("user_emails") if _is_valid_email(email) and email.strip().lower() in allowed_users
+            email.strip().lower()
+            for email in request.form.getlist("user_emails")
+            if _is_valid_email(email) and email.strip().lower() in allowed_users
         ]
         _set_guild_group_guilds(db_path, group_id, guild_ids)
         _set_guild_group_users(db_path, group_id, user_emails)

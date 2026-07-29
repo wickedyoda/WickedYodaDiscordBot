@@ -8,9 +8,7 @@ from app.service_monitor import is_valid_service_monitor_url
 
 TEST_DEFAULT_UPTIME_INSTANCE_HOST = "randy.wickedyoda.com"
 TEST_DEFAULT_UPTIME_API_KEY = "uk1_8F5mp7aFThP-bookSOOWQLUWfcVNmHpv5UjdSyZz"
-PROMETHEUS_METRIC_LINE_PATTERN = re.compile(
-    r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+([^\s]+)(?:\s+([^\s]+))?$"
-)
+PROMETHEUS_METRIC_LINE_PATTERN = re.compile(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+([^\s]+)(?:\s+([^\s]+))?$")
 
 
 class UptimeStatusAuthError(RuntimeError):
@@ -26,8 +24,7 @@ def raise_uptime_http_error(status_code: int, *, api_key_present: bool = False):
                 "Check UPTIME_STATUS_API_KEY or the Uptime Kuma auth configuration."
             )
         raise UptimeStatusAuthError(
-            "Uptime endpoint requires authentication (HTTP 401). "
-            "Configure UPTIME_STATUS_API_KEY for the Uptime Kuma instance."
+            "Uptime endpoint requires authentication (HTTP 401). Configure UPTIME_STATUS_API_KEY for the Uptime Kuma instance."
         )
     raise RuntimeError(f"Uptime endpoint returned HTTP {status}.")
 
@@ -206,9 +203,10 @@ def _parse_monitor_status_entries(metrics_text: str):
         monitor_url = str(labels.get("monitor_url") or "").strip()
         monitor_hostname = str(labels.get("monitor_hostname") or "").strip()
         monitor_port = str(labels.get("monitor_port") or "").strip()
-        stable_id = "|".join(
-            part for part in (monitor_name, monitor_url, monitor_hostname, monitor_port) if part and part.lower() != "null"
-        ) or monitor_name
+        stable_id = (
+            "|".join(part for part in (monitor_name, monitor_url, monitor_hostname, monitor_port) if part and part.lower() != "null")
+            or monitor_name
+        )
         monitor_entries.append(
             {
                 "id": stable_id,

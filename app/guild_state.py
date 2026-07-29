@@ -207,9 +207,7 @@ class GuildStateManager:
                     "mod_log_channel_id": int(row["mod_log_channel_id"] or 0),
                     "firmware_notify_channel_id": int(row["firmware_notify_channel_id"] or 0),
                     "hi_channel_id": int(row["hi_channel_id"] or 0) if "hi_channel_id" in available_columns else 0,
-                    "hi_channel_text": str(row["hi_channel_text"] or "Hi :)")
-                    if "hi_channel_text" in available_columns
-                    else "Hi :)",
+                    "hi_channel_text": str(row["hi_channel_text"] or "Hi :)") if "hi_channel_text" in available_columns else "Hi :)",
                     "bad_words_enabled": 1 if int(row["bad_words_enabled"] or 0) > 0 else 0,
                     "bad_words_list_json": str(row["bad_words_list_json"] or "[]"),
                     "bad_words_warning_window_hours": int(row["bad_words_warning_window_hours"] or 72),
@@ -282,13 +280,20 @@ class GuildStateManager:
         merged["hi_channel_text"] = (
             str(source.get("hi_channel_text", current.get("hi_channel_text", "Hi :)")) or "Hi :)").strip() or "Hi :)"
         )
-        merged["bad_words_enabled"] = 1 if str(source.get("bad_words_enabled", current.get("bad_words_enabled", 0))).strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        } else 0
-        merged["bad_words_list_json"] = str(source.get("bad_words_list_json", current.get("bad_words_list_json", "[]")) or "[]").strip() or "[]"
+        merged["bad_words_enabled"] = (
+            1
+            if str(source.get("bad_words_enabled", current.get("bad_words_enabled", 0))).strip().lower()
+            in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            else 0
+        )
+        merged["bad_words_list_json"] = (
+            str(source.get("bad_words_list_json", current.get("bad_words_list_json", "[]")) or "[]").strip() or "[]"
+        )
         merged["bad_words_warning_window_hours"] = self.parse_int_setting(
             source.get("bad_words_warning_window_hours", current.get("bad_words_warning_window_hours", 72)),
             72,
@@ -299,7 +304,9 @@ class GuildStateManager:
             3,
             minimum=1,
         )
-        merged["bad_words_action"] = str(source.get("bad_words_action", current.get("bad_words_action", "timeout")) or "timeout").strip().lower() or "timeout"
+        merged["bad_words_action"] = (
+            str(source.get("bad_words_action", current.get("bad_words_action", "timeout")) or "timeout").strip().lower() or "timeout"
+        )
         merged["bad_words_timeout_minutes"] = self.parse_int_setting(
             source.get("bad_words_timeout_minutes", current.get("bad_words_timeout_minutes", 60)),
             60,
@@ -320,9 +327,7 @@ class GuildStateManager:
             minimum=0,
         )
         merged["discourse_enabled"] = normalize_discourse_override(source.get("discourse_enabled", current.get("discourse_enabled", -1)))
-        merged["discourse_base_url"] = normalize_discourse_base_url(
-            source.get("discourse_base_url", current.get("discourse_base_url", ""))
-        )
+        merged["discourse_base_url"] = normalize_discourse_base_url(source.get("discourse_base_url", current.get("discourse_base_url", "")))
         if "discourse_api_key" in source:
             merged["discourse_api_key"] = str(source.get("discourse_api_key") or "").strip()
         elif str(source.get("discourse_api_key_clear") or "").strip().lower() in {"1", "true", "yes", "on"}:
@@ -341,21 +346,30 @@ class GuildStateManager:
         merged["discourse_features_json"] = serialize_discourse_features(
             source.get("discourse_features_json", current.get("discourse_features_json", DISCOURSE_DEFAULT_FEATURES))
         )
-        merged["welcome_dm_enabled"] = 1 if str(source.get("welcome_dm_enabled", current.get("welcome_dm_enabled", 0))).strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        } else 0
-        merged["welcome_channel_image_enabled"] = 1 if str(
-            source.get("welcome_channel_image_enabled", current.get("welcome_channel_image_enabled", 0))
-        ).strip().lower() in {"1", "true", "yes", "on"} else 0
-        merged["welcome_dm_image_enabled"] = 1 if str(
-            source.get("welcome_dm_image_enabled", current.get("welcome_dm_image_enabled", 0))
-        ).strip().lower() in {"1", "true", "yes", "on"} else 0
-        merged["welcome_channel_message"] = str(
-            source.get("welcome_channel_message", current.get("welcome_channel_message", ""))
-        ).strip()
+        merged["welcome_dm_enabled"] = (
+            1
+            if str(source.get("welcome_dm_enabled", current.get("welcome_dm_enabled", 0))).strip().lower()
+            in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            else 0
+        )
+        merged["welcome_channel_image_enabled"] = (
+            1
+            if str(source.get("welcome_channel_image_enabled", current.get("welcome_channel_image_enabled", 0))).strip().lower()
+            in {"1", "true", "yes", "on"}
+            else 0
+        )
+        merged["welcome_dm_image_enabled"] = (
+            1
+            if str(source.get("welcome_dm_image_enabled", current.get("welcome_dm_image_enabled", 0))).strip().lower()
+            in {"1", "true", "yes", "on"}
+            else 0
+        )
+        merged["welcome_channel_message"] = str(source.get("welcome_channel_message", current.get("welcome_channel_message", ""))).strip()
         merged["welcome_dm_message"] = str(source.get("welcome_dm_message", current.get("welcome_dm_message", ""))).strip()
         if str(source.get("welcome_image_remove", "")).strip().lower() in {"1", "true", "yes", "on"}:
             merged["welcome_image_filename"] = ""
@@ -431,9 +445,7 @@ class GuildStateManager:
             ]
             placeholders = ", ".join("?" for _ in persisted_columns)
             update_columns = [column for column in persisted_columns if column != "guild_id"]
-            update_clause = ",\n                    ".join(
-                f"{column}=excluded.{column}" for column in update_columns
-            )
+            update_clause = ",\n                    ".join(f"{column}=excluded.{column}" for column in update_columns)
             values_by_column = {
                 "guild_id": safe_guild_id,
                 "bot_log_channel_id": merged["bot_log_channel_id"],

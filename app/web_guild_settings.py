@@ -60,12 +60,24 @@ def process_guild_settings_submission(
         "firmware_notify_channel_id": form.get("firmware_notify_channel_id", ""),
         "hi_channel_id": form.get("hi_channel_id", ""),
         "hi_channel_text": form.get("hi_channel_text", ""),
-        "firmware_monitor_enabled": -1 if not form.get("firmware_monitor_enabled__override") else (1 if form.get("firmware_monitor_enabled") else 0),
-        "reddit_feed_notify_enabled": -1 if not form.get("reddit_feed_notify_enabled__override") else (1 if form.get("reddit_feed_notify_enabled") else 0),
-        "youtube_notify_enabled": -1 if not form.get("youtube_notify_enabled__override") else (1 if form.get("youtube_notify_enabled") else 0),
-        "linkedin_notify_enabled": -1 if not form.get("linkedin_notify_enabled__override") else (1 if form.get("linkedin_notify_enabled") else 0),
-        "beta_program_notify_enabled": -1 if not form.get("beta_program_notify_enabled__override") else (1 if form.get("beta_program_notify_enabled") else 0),
-        "forum_announcements_enabled": -1 if not form.get("forum_announcements_enabled__override") else (1 if form.get("forum_announcements_enabled") else 0),
+        "firmware_monitor_enabled": -1
+        if not form.get("firmware_monitor_enabled__override")
+        else (1 if form.get("firmware_monitor_enabled") else 0),
+        "reddit_feed_notify_enabled": -1
+        if not form.get("reddit_feed_notify_enabled__override")
+        else (1 if form.get("reddit_feed_notify_enabled") else 0),
+        "youtube_notify_enabled": -1
+        if not form.get("youtube_notify_enabled__override")
+        else (1 if form.get("youtube_notify_enabled") else 0),
+        "linkedin_notify_enabled": -1
+        if not form.get("linkedin_notify_enabled__override")
+        else (1 if form.get("linkedin_notify_enabled") else 0),
+        "beta_program_notify_enabled": -1
+        if not form.get("beta_program_notify_enabled__override")
+        else (1 if form.get("beta_program_notify_enabled") else 0),
+        "forum_announcements_enabled": -1
+        if not form.get("forum_announcements_enabled__override")
+        else (1 if form.get("forum_announcements_enabled") else 0),
         "forum_announcements_channel_id": form.get("forum_announcements_channel_id", ""),
         "access_role_id": form.get("access_role_id", ""),
         "welcome_channel_id": form.get("welcome_channel_id", ""),
@@ -97,10 +109,7 @@ def process_guild_settings_submission(
             if metadata is None:
                 messages.append(("Welcome image content is not a valid PNG, JPEG, GIF, or WEBP file.", "error"))
                 upload_valid = False
-            elif (
-                int(metadata.get("width") or 0) < WELCOME_IMAGE_MIN_WIDTH
-                or int(metadata.get("height") or 0) < WELCOME_IMAGE_MIN_HEIGHT
-            ):
+            elif int(metadata.get("width") or 0) < WELCOME_IMAGE_MIN_WIDTH or int(metadata.get("height") or 0) < WELCOME_IMAGE_MIN_HEIGHT:
                 messages.append(
                     (
                         "Welcome image is too small "
@@ -110,10 +119,7 @@ def process_guild_settings_submission(
                     )
                 )
                 upload_valid = False
-            elif (
-                int(metadata.get("width") or 0) > WELCOME_IMAGE_MAX_WIDTH
-                or int(metadata.get("height") or 0) > WELCOME_IMAGE_MAX_HEIGHT
-            ):
+            elif int(metadata.get("width") or 0) > WELCOME_IMAGE_MAX_WIDTH or int(metadata.get("height") or 0) > WELCOME_IMAGE_MAX_HEIGHT:
                 messages.append(
                     (
                         "Welcome image dimensions are too large "
@@ -211,8 +217,12 @@ def render_guild_settings_body(
     welcome_channel_message = str(current_settings.get("welcome_channel_message") or "")
     welcome_dm_message = str(current_settings.get("welcome_dm_message") or "")
     welcome_image_filename = str(current_settings.get("welcome_image_filename") or "")
-    welcome_image_media_type = str(effective_settings.get("welcome_image_media_type") or current_settings.get("welcome_image_media_type") or "")
-    welcome_image_size_bytes = int(effective_settings.get("welcome_image_size_bytes") or current_settings.get("welcome_image_size_bytes") or 0)
+    welcome_image_media_type = str(
+        effective_settings.get("welcome_image_media_type") or current_settings.get("welcome_image_media_type") or ""
+    )
+    welcome_image_size_bytes = int(
+        effective_settings.get("welcome_image_size_bytes") or current_settings.get("welcome_image_size_bytes") or 0
+    )
     welcome_image_width = int(effective_settings.get("welcome_image_width") or current_settings.get("welcome_image_width") or 0)
     welcome_image_height = int(effective_settings.get("welcome_image_height") or current_settings.get("welcome_image_height") or 0)
     welcome_image_configured = bool(effective_settings.get("welcome_image_configured"))
@@ -283,60 +293,60 @@ def render_guild_settings_body(
                 <tr>
                   <td><strong>Firmware Monitor</strong><div class="muted mono">firmware_monitor_enabled</div></td>
                   <td>
-                    <label><input type="checkbox" name="firmware_monitor_enabled__override" value="1"{' checked' if firmware_monitor_override >= 0 else ''} /> Override global setting</label>
-                    <label style="display:block; margin-top:8px;"><input type="checkbox" name="firmware_monitor_enabled" value="1"{' checked' if firmware_monitor_override > 0 else ''} /> Enabled for this guild</label>
+                    <label><input type="checkbox" name="firmware_monitor_enabled__override" value="1"{" checked" if firmware_monitor_override >= 0 else ""} /> Override global setting</label>
+                    <label style="display:block; margin-top:8px;"><input type="checkbox" name="firmware_monitor_enabled" value="1"{" checked" if firmware_monitor_override > 0 else ""} /> Enabled for this guild</label>
                   </td>
-                  <td class="muted mono">{'enabled' if int(effective_settings.get("firmware_monitor_enabled") or 0) > 0 else 'disabled'}<div class="muted">{escape(format_override_state(firmware_monitor_override))}</div></td>
+                  <td class="muted mono">{"enabled" if int(effective_settings.get("firmware_monitor_enabled") or 0) > 0 else "disabled"}<div class="muted">{escape(format_override_state(firmware_monitor_override))}</div></td>
                 </tr>
                 """,
         f"""
                 <tr>
                   <td><strong>Reddit Feed Monitor</strong><div class="muted mono">reddit_feed_notify_enabled</div></td>
                   <td>
-                    <label><input type="checkbox" name="reddit_feed_notify_enabled__override" value="1"{' checked' if reddit_feed_override >= 0 else ''} /> Override global setting</label>
-                    <label style="display:block; margin-top:8px;"><input type="checkbox" name="reddit_feed_notify_enabled" value="1"{' checked' if reddit_feed_override > 0 else ''} /> Enabled for this guild</label>
+                    <label><input type="checkbox" name="reddit_feed_notify_enabled__override" value="1"{" checked" if reddit_feed_override >= 0 else ""} /> Override global setting</label>
+                    <label style="display:block; margin-top:8px;"><input type="checkbox" name="reddit_feed_notify_enabled" value="1"{" checked" if reddit_feed_override > 0 else ""} /> Enabled for this guild</label>
                   </td>
-                  <td class="muted mono">{'enabled' if int(effective_settings.get("reddit_feed_notify_enabled") or 0) > 0 else 'disabled'}<div class="muted">{escape(format_override_state(reddit_feed_override))}</div></td>
+                  <td class="muted mono">{"enabled" if int(effective_settings.get("reddit_feed_notify_enabled") or 0) > 0 else "disabled"}<div class="muted">{escape(format_override_state(reddit_feed_override))}</div></td>
                 </tr>
                 """,
         f"""
                 <tr>
                   <td><strong>YouTube Notifications</strong><div class="muted mono">youtube_notify_enabled</div></td>
                   <td>
-                    <label><input type="checkbox" name="youtube_notify_enabled__override" value="1"{' checked' if youtube_notify_override >= 0 else ''} /> Override global setting</label>
-                    <label style="display:block; margin-top:8px;"><input type="checkbox" name="youtube_notify_enabled" value="1"{' checked' if youtube_notify_override > 0 else ''} /> Enabled for this guild</label>
+                    <label><input type="checkbox" name="youtube_notify_enabled__override" value="1"{" checked" if youtube_notify_override >= 0 else ""} /> Override global setting</label>
+                    <label style="display:block; margin-top:8px;"><input type="checkbox" name="youtube_notify_enabled" value="1"{" checked" if youtube_notify_override > 0 else ""} /> Enabled for this guild</label>
                   </td>
-                  <td class="muted mono">{'enabled' if int(effective_settings.get("youtube_notify_enabled") or 0) > 0 else 'disabled'}<div class="muted">{escape(format_override_state(youtube_notify_override))}</div></td>
+                  <td class="muted mono">{"enabled" if int(effective_settings.get("youtube_notify_enabled") or 0) > 0 else "disabled"}<div class="muted">{escape(format_override_state(youtube_notify_override))}</div></td>
                 </tr>
                 """,
         f"""
                 <tr>
                   <td><strong>LinkedIn Notifications</strong><div class="muted mono">linkedin_notify_enabled</div></td>
                   <td>
-                    <label><input type="checkbox" name="linkedin_notify_enabled__override" value="1"{' checked' if linkedin_notify_override >= 0 else ''} /> Override global setting</label>
-                    <label style="display:block; margin-top:8px;"><input type="checkbox" name="linkedin_notify_enabled" value="1"{' checked' if linkedin_notify_override > 0 else ''} /> Enabled for this guild</label>
+                    <label><input type="checkbox" name="linkedin_notify_enabled__override" value="1"{" checked" if linkedin_notify_override >= 0 else ""} /> Override global setting</label>
+                    <label style="display:block; margin-top:8px;"><input type="checkbox" name="linkedin_notify_enabled" value="1"{" checked" if linkedin_notify_override > 0 else ""} /> Enabled for this guild</label>
                   </td>
-                  <td class="muted mono">{'enabled' if int(effective_settings.get("linkedin_notify_enabled") or 0) > 0 else 'disabled'}<div class="muted">{escape(format_override_state(linkedin_notify_override))}</div></td>
+                  <td class="muted mono">{"enabled" if int(effective_settings.get("linkedin_notify_enabled") or 0) > 0 else "disabled"}<div class="muted">{escape(format_override_state(linkedin_notify_override))}</div></td>
                 </tr>
                 """,
         f"""
                 <tr>
                   <td><strong>Beta Program Notifications</strong><div class="muted mono">beta_program_notify_enabled</div></td>
                   <td>
-                    <label><input type="checkbox" name="beta_program_notify_enabled__override" value="1"{' checked' if beta_program_notify_override >= 0 else ''} /> Override global setting</label>
-                    <label style="display:block; margin-top:8px;"><input type="checkbox" name="beta_program_notify_enabled" value="1"{' checked' if beta_program_notify_override > 0 else ''} /> Enabled for this guild</label>
+                    <label><input type="checkbox" name="beta_program_notify_enabled__override" value="1"{" checked" if beta_program_notify_override >= 0 else ""} /> Override global setting</label>
+                    <label style="display:block; margin-top:8px;"><input type="checkbox" name="beta_program_notify_enabled" value="1"{" checked" if beta_program_notify_override > 0 else ""} /> Enabled for this guild</label>
                   </td>
-                  <td class="muted mono">{'enabled' if int(effective_settings.get("beta_program_notify_enabled") or 0) > 0 else 'disabled'}<div class="muted">{escape(format_override_state(beta_program_notify_override))}</div></td>
+                  <td class="muted mono">{"enabled" if int(effective_settings.get("beta_program_notify_enabled") or 0) > 0 else "disabled"}<div class="muted">{escape(format_override_state(beta_program_notify_override))}</div></td>
                 </tr>
                 """,
         f"""
                 <tr>
                   <td><strong>Forum Announcements</strong><div class="muted mono">forum_announcements_enabled</div></td>
                   <td>
-                    <label><input type="checkbox" name="forum_announcements_enabled__override" value="1"{' checked' if forum_announcements_override >= 0 else ''} /> Override global setting</label>
-                    <label style="display:block; margin-top:8px;"><input type="checkbox" name="forum_announcements_enabled" value="1"{' checked' if forum_announcements_override > 0 else ''} /> Enabled for this guild</label>
+                    <label><input type="checkbox" name="forum_announcements_enabled__override" value="1"{" checked" if forum_announcements_override >= 0 else ""} /> Override global setting</label>
+                    <label style="display:block; margin-top:8px;"><input type="checkbox" name="forum_announcements_enabled" value="1"{" checked" if forum_announcements_override > 0 else ""} /> Enabled for this guild</label>
                   </td>
-                  <td class="muted mono">{'enabled' if int(effective_settings.get("forum_announcements_enabled") or 0) > 0 else 'disabled'}<div class="muted">{escape(format_override_state(forum_announcements_override))}</div></td>
+                  <td class="muted mono">{"enabled" if int(effective_settings.get("forum_announcements_enabled") or 0) > 0 else "disabled"}<div class="muted">{escape(format_override_state(forum_announcements_override))}</div></td>
                 </tr>
                 """,
         f"""
@@ -348,7 +358,7 @@ def render_guild_settings_body(
                       {"".join(f"<option value='{escape(str(option.get('id') or ''), quote=True)}'{' selected' if str(option.get('id') or '') == forum_announcements_channel_id else ''}>{escape(str(option.get('name') or option.get('id') or ''))} ({escape(str(option.get('id') or ''))})</option>" for option in text_channel_options)}
                     </select>
                   </td>
-                  <td class="muted mono">{escape(forum_announcements_channel_id) or 'Use global / disabled'}</td>
+                  <td class="muted mono">{escape(forum_announcements_channel_id) or "Use global / disabled"}</td>
                 </tr>
                 """,
     ]
@@ -370,8 +380,8 @@ def render_guild_settings_body(
         f"""
                 <tr>
                   <td><strong>Send Welcome DM</strong><div class="muted mono">welcome_dm_enabled</div></td>
-                  <td><label><input type="checkbox" name="welcome_dm_enabled" value="1"{' checked' if welcome_dm_enabled else ''} /> Enable DM on join</label></td>
-                  <td class="muted mono">{'enabled' if int(effective_settings.get("welcome_dm_enabled") or 0) > 0 else 'disabled'}</td>
+                  <td><label><input type="checkbox" name="welcome_dm_enabled" value="1"{" checked" if welcome_dm_enabled else ""} /> Enable DM on join</label></td>
+                  <td class="muted mono">{"enabled" if int(effective_settings.get("welcome_dm_enabled") or 0) > 0 else "disabled"}</td>
                 </tr>
                 """,
         f"""
@@ -392,8 +402,8 @@ def render_guild_settings_body(
                     <label style="display:block; margin-top:8px;"><input type="checkbox" name="welcome_image_remove" value="1" /> Remove current image</label>
                   </td>
                   <td class="muted">
-                    {'configured' if welcome_image_configured else 'not configured'}
-                    <div class="mono" style="margin-top:6px;">{escape(welcome_image_media_type or 'n/a')}</div>
+                    {"configured" if welcome_image_configured else "not configured"}
+                    <div class="mono" style="margin-top:6px;">{escape(welcome_image_media_type or "n/a")}</div>
                     <div class="mono">{escape(welcome_image_size_label)}</div>
                     <div class="mono">{escape(welcome_image_dimensions_label)}</div>
                   </td>
@@ -402,15 +412,15 @@ def render_guild_settings_body(
         f"""
                 <tr>
                   <td><strong>Attach Image In Channel</strong><div class="muted mono">welcome_channel_image_enabled</div></td>
-                  <td><label><input type="checkbox" name="welcome_channel_image_enabled" value="1"{' checked' if welcome_channel_image_enabled else ''} /> Attach uploaded image to channel welcome</label></td>
-                  <td class="muted mono">{'enabled' if int(effective_settings.get("welcome_channel_image_enabled") or 0) > 0 else 'disabled'}</td>
+                  <td><label><input type="checkbox" name="welcome_channel_image_enabled" value="1"{" checked" if welcome_channel_image_enabled else ""} /> Attach uploaded image to channel welcome</label></td>
+                  <td class="muted mono">{"enabled" if int(effective_settings.get("welcome_channel_image_enabled") or 0) > 0 else "disabled"}</td>
                 </tr>
                 """,
         f"""
                 <tr>
                   <td><strong>Attach Image In DM</strong><div class="muted mono">welcome_dm_image_enabled</div></td>
-                  <td><label><input type="checkbox" name="welcome_dm_image_enabled" value="1"{' checked' if welcome_dm_image_enabled else ''} /> Attach uploaded image to welcome DM</label></td>
-                  <td class="muted mono">{'enabled' if int(effective_settings.get("welcome_dm_image_enabled") or 0) > 0 else 'disabled'}</td>
+                  <td><label><input type="checkbox" name="welcome_dm_image_enabled" value="1"{" checked" if welcome_dm_image_enabled else ""} /> Attach uploaded image to welcome DM</label></td>
+                  <td class="muted mono">{"enabled" if int(effective_settings.get("welcome_dm_image_enabled") or 0) > 0 else "disabled"}</td>
                 </tr>
                 """,
     ]

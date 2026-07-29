@@ -89,7 +89,9 @@ def format_dice_emojis(roll: RollResults20th) -> str:
     return " ".join(parts) if parts else "—"
 
 
-def build_dice_embed(roll: RollResults20th, author_name: str, author_icon: str | None = None, character_name: str | None = None, notes: str | None = None) -> dict:
+def build_dice_embed(
+    roll: RollResults20th, author_name: str, author_icon: str | None = None, character_name: str | None = None, notes: str | None = None
+) -> dict:
     title = f"Pool {roll.pool} | Diff {roll.difficulty}"
     if roll.nightmare:
         title += f" | Nightmare {roll.nightmare}"
@@ -117,11 +119,13 @@ def build_dice_embed(roll: RollResults20th, author_name: str, author_icon: str |
         fields.append({"name": "Notes", "value": notes, "inline": False})
 
     fields.append({"name": "Result", "value": f"{roll.successes} successes | {roll.outcome}", "inline": False})
-    fields.append({
-        "name": "\u200b",
-        "value": "[Website](https://realmofdarkness.app/) | [Commands](https://realmofdarkness.app/20th/commands/) | [Patreon](https://www.patreon.com/MiraiMiki)",
-        "inline": False,
-    })
+    fields.append(
+        {
+            "name": "\u200b",
+            "value": "[Website](https://realmofdarkness.app/) | [Commands](https://realmofdarkness.app/20th/commands/) | [Patreon](https://www.patreon.com/MiraiMiki)",
+            "inline": False,
+        }
+    )
 
     embed: dict = {
         "title": title,

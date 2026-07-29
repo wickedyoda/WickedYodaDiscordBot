@@ -191,7 +191,9 @@ def fetch_discourse_topic(
         "id": int(payload.get("id") or topic_id),
         "title": title,
         "slug": str(payload.get("slug") or "").strip(),
-        "url": urljoin(f"{base_url.rstrip('/')}/", f"t/{payload.get('slug') or payload.get('id') or topic_id}/{payload.get('id') or topic_id}"),
+        "url": urljoin(
+            f"{base_url.rstrip('/')}/", f"t/{payload.get('slug') or payload.get('id') or topic_id}/{payload.get('id') or topic_id}"
+        ),
         "posts": [
             {
                 "id": int(post.get("id") or 0),

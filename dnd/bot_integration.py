@@ -40,6 +40,7 @@ def ensure_dnd_schema() -> None:
     from dnd.characters import ensure_schema as ensure_character_schema
     from dnd.chronicle_schema import ensure_schema as ensure_chronicle_schema
     from dnd.initiative_repo import ensure_schema as ensure_init_schema
+
     ensure_chronicle_schema(DND_DB_PATH)
     ensure_character_schema(DND_DB_PATH)
     ensure_init_schema(DND_DB_PATH)
@@ -73,17 +74,55 @@ def _allowed_splats(db_path: str, guild_id: int) -> list[str]:
 
 def _sheet_fields_for_splat(splat: str, name: str, data: dict) -> list[str]:
     if splat in {"vampire20th", "vampire"}:
-        return [f"**{name}** - Vampire 20th", f"- Generation: {data.get('generation', '?')}", f"- Clan: {data.get('clan', '?')}", f"- Blood Pool: {data.get('blood', '?')}", f"- Embrace: {data.get('embrace', '?')}", f"- Sire: {data.get('sire', '?')}", f"- Path: {data.get('path', '?')}"]
+        return [
+            f"**{name}** - Vampire 20th",
+            f"- Generation: {data.get('generation', '?')}",
+            f"- Clan: {data.get('clan', '?')}",
+            f"- Blood Pool: {data.get('blood', '?')}",
+            f"- Embrace: {data.get('embrace', '?')}",
+            f"- Sire: {data.get('sire', '?')}",
+            f"- Path: {data.get('path', '?')}",
+        ]
     if splat in {"werewolf", "garou"}:
-        return [f"**{name}** - Werewolf", f"- Tribe: {data.get('tribe', '?')}", f"- Auspice: {data.get('auspice', '?')}", f"- Breed: {data.get('breed', '?')}", f"- Gnosis: {data.get('gnosis', '?')}"]
+        return [
+            f"**{name}** - Werewolf",
+            f"- Tribe: {data.get('tribe', '?')}",
+            f"- Auspice: {data.get('auspice', '?')}",
+            f"- Breed: {data.get('breed', '?')}",
+            f"- Gnosis: {data.get('gnosis', '?')}",
+        ]
     if splat in {"mage", "m20"}:
-        return [f"**{name}** - Mage", f"- Tradition: {data.get('tradition', '?')}", f"- Essence: {data.get('essence', '?')}", f"- Paradox: {data.get('paradox', '?')}", f"- Spheres: {data.get('spheres', '?')}"]
+        return [
+            f"**{name}** - Mage",
+            f"- Tradition: {data.get('tradition', '?')}",
+            f"- Essence: {data.get('essence', '?')}",
+            f"- Paradox: {data.get('paradox', '?')}",
+            f"- Spheres: {data.get('spheres', '?')}",
+        ]
     if splat in {"demon", "demon20th"}:
-        return [f"**{name}** - Demon", f"- House: {data.get('house', '?')}", f"- Species: {data.get('species', '?')}", f"- Faith: {data.get('faith', '?')}", f"- Torment: {data.get('torment', '?')}"]
+        return [
+            f"**{name}** - Demon",
+            f"- House: {data.get('house', '?')}",
+            f"- Species: {data.get('species', '?')}",
+            f"- Faith: {data.get('faith', '?')}",
+            f"- Torment: {data.get('torment', '?')}",
+        ]
     if splat in {"changeling", "ctd"}:
-        return [f"**{name}** - Changeling", f"- Kith: {data.get('kith', '?')}", f"- Seeming: {data.get('seeming', '?')}", f"- House: {data.get('house', '?')}", f"- Glamour: {data.get('glamour', '?')}"]
+        return [
+            f"**{name}** - Changeling",
+            f"- Kith: {data.get('kith', '?')}",
+            f"- Seeming: {data.get('seeming', '?')}",
+            f"- House: {data.get('house', '?')}",
+            f"- Glamour: {data.get('glamour', '?')}",
+        ]
     if splat in {"wraith", "wto"}:
-        return [f"**{name}** - Wraith", f"- Legion: {data.get('legion', '?')}", f"- Guild: {data.get('guild', '?')}", f"- Shadow: {data.get('shadow', '?')}", f"- Pathos: {data.get('pathos', '?')}"]
+        return [
+            f"**{name}** - Wraith",
+            f"- Legion: {data.get('legion', '?')}",
+            f"- Guild: {data.get('guild', '?')}",
+            f"- Shadow: {data.get('shadow', '?')}",
+            f"- Pathos: {data.get('pathos', '?')}",
+        ]
     fields = [f"**{name}**"]
     if data:
         fields.extend(f"- {k}: {v}" for k, v in data.items())
@@ -105,14 +144,30 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
     async def _log(interaction: Any, action: str, reason: str = "", *, success: bool = True) -> None:
         if log_interaction is None:
             return
-        await log_interaction({"guild": getattr(interaction, "guild", None), "user": getattr(interaction, "user", None)}, action=action, reason=reason, success=success)
+        await log_interaction(
+            {"guild": getattr(interaction, "guild", None), "user": getattr(interaction, "user", None)},
+            action=action,
+            reason=reason,
+            success=success,
+        )
 
     dnd_group = bot.tree.get_command("dnd")
     if dnd_group is None:
         raise RuntimeError("Missing `/dnd` application group.")
 
     @dnd_group.command(name="roll", description="20th Anniversary Edition dice roll.")
-    async def dice_roll(interaction: discord.Interaction, pool: int, difficulty: int, willpower: bool = False, modifier: int = 0, speciality: str | None = None, nightmare: int = 0, no_botch: bool = False, character: str | None = None, notes: str | None = None) -> None:  # type: ignore[misc]
+    async def dice_roll(
+        interaction: discord.Interaction,
+        pool: int,
+        difficulty: int,
+        willpower: bool = False,
+        modifier: int = 0,
+        speciality: str | None = None,
+        nightmare: int = 0,
+        no_botch: bool = False,
+        character: str | None = None,
+        notes: str | None = None,
+    ) -> None:  # type: ignore[misc]
         if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_roll"):
             return
         try:
@@ -145,7 +200,17 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
         await _log(interaction, "dnd_roll", f"pool={validated_pool} diff={validated_diff} result={result.successes}", success=True)
 
     @dnd_group.command(name="general", description="General multi-set dice roll.")
-    async def dice_general(interaction: discord.Interaction, dice_set_01: str, modifier: int = 0, dice_set_02: str | None = None, dice_set_03: str | None = None, dice_set_04: str | None = None, dice_set_05: str | None = None, difficulty: int | None = None, notes: str | None = None) -> None:  # type: ignore[misc]
+    async def dice_general(
+        interaction: discord.Interaction,
+        dice_set_01: str,
+        modifier: int = 0,
+        dice_set_02: str | None = None,
+        dice_set_03: str | None = None,
+        dice_set_04: str | None = None,
+        dice_set_05: str | None = None,
+        difficulty: int | None = None,
+        notes: str | None = None,
+    ) -> None:  # type: ignore[misc]
         if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_general"):
             return
         try:
@@ -157,12 +222,16 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
             return
         author_name = str(interaction.user.display_name)
         author_icon = interaction.user.display_avatar.url if interaction.user.display_avatar else None
-        emb = general_roll.build_general_embed(sets, modifier=modifier, difficulty=difficulty, notes=notes, author_name=author_name, author_icon=author_icon)
+        emb = general_roll.build_general_embed(
+            sets, modifier=modifier, difficulty=difficulty, notes=notes, author_name=author_name, author_icon=author_icon
+        )
         await interaction.response.send_message(embed=discord.Embed.from_dict(emb))
         await _log(interaction, "dnd_general", f"sets={len(sets)}", success=True)
 
     @dnd_group.command(name="initiative", description="Initiative tracker helpers.")
-    async def dice_initiative(interaction: discord.Interaction, action: str = "new", dex_wits: int = 0, character: str | None = None, notes: str | None = None) -> None:  # type: ignore[misc]
+    async def dice_initiative(
+        interaction: discord.Interaction, action: str = "new", dex_wits: int = 0, character: str | None = None, notes: str | None = None
+    ) -> None:  # type: ignore[misc]
         if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_initiative"):
             return
         if not interaction.guild:
@@ -174,7 +243,11 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
         owner_id = interaction.user.id
         if action == "new":
             tracker = initiative_domain.InitiativeTracker(channel_id=channel_id, guild_id=guild_id, owner_id=owner_id)
-            tracker.characters.append(initiative_domain.InitiativeCharacter(member_id=owner_id, display_name=interaction.user.display_name, dex_wits=max(1, int(dex_wits or 0))))
+            tracker.characters.append(
+                initiative_domain.InitiativeCharacter(
+                    member_id=owner_id, display_name=interaction.user.display_name, dex_wits=max(1, int(dex_wits or 0))
+                )
+            )
             tracker.characters[-1].compute()
             save_tracker(DND_DB_PATH, tracker)
             if reply_ephemeral:
@@ -185,7 +258,9 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
                 if reply_ephemeral:
                     await reply_ephemeral(interaction, "No tracker in this channel. Start with `new`.")
                 return
-            char = initiative_domain.InitiativeCharacter(member_id=owner_id, display_name=interaction.user.display_name, dex_wits=max(1, int(dex_wits or 0)))
+            char = initiative_domain.InitiativeCharacter(
+                member_id=owner_id, display_name=interaction.user.display_name, dex_wits=max(1, int(dex_wits or 0))
+            )
             char.compute()
             tracker.characters.append(char)
             save_tracker(DND_DB_PATH, tracker)
@@ -205,12 +280,31 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
             await interaction.response.send_message("Use `new`, `roll`, or `end`.", ephemeral=True)
 
     @dnd_group.command(name="character", description="Storage-backed character helpers.")
-    async def dice_character(interaction: discord.Interaction, action: str = "find", splat: str | None = None, name: str | None = None, payload: str | None = None) -> None:  # type: ignore[misc]
+    async def dice_character(
+        interaction: discord.Interaction,
+        action: str = "find",
+        splat: str | None = None,
+        name: str | None = None,
+        payload: str | None = None,
+    ) -> None:  # type: ignore[misc]
         await _run_character_command(interaction, action=action, splat=splat, name=name, payload=payload)
 
-    @app_commands.describe(action="Create, send, list, or delete a proxy.", name="Proxy name.", template="Message template. `{name}` and `{content}` are replaced.", avatar_url="Avatar URL for the proxy.", message="Optional message text to send.")
+    @app_commands.describe(
+        action="Create, send, list, or delete a proxy.",
+        name="Proxy name.",
+        template="Message template. `{name}` and `{content}` are replaced.",
+        avatar_url="Avatar URL for the proxy.",
+        message="Optional message text to send.",
+    )
     @dnd_group.command(name="proxy", description="Proxy identity helpers.")
-    async def dice_proxy(interaction: discord.Interaction, action: str = "create", name: str = "", template: str = "{name}: {content}", avatar_url: str = "", message: str | None = None) -> None:  # type: ignore[misc]
+    async def dice_proxy(
+        interaction: discord.Interaction,
+        action: str = "create",
+        name: str = "",
+        template: str = "{name}: {content}",
+        avatar_url: str = "",
+        message: str | None = None,
+    ) -> None:  # type: ignore[misc]
         await _run_proxy_command(interaction, action=action, name=name, template=template, avatar_url=avatar_url, message=message)
 
     @dnd_group.command(name="chronicle", description="Chronicle server helpers.")
@@ -283,7 +377,9 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
             await interaction.response.send_message("Use `add` or `history`.", ephemeral=True)
 
     @dnd_group.command(name="reward", description="Auto reward helpers.")
-    async def dice_reward(interaction: discord.Interaction, action: str = "status", rule_name: str = "", threshold: int = 10, reward: float = 1) -> None:  # type: ignore[misc]
+    async def dice_reward(
+        interaction: discord.Interaction, action: str = "status", rule_name: str = "", threshold: int = 10, reward: float = 1
+    ) -> None:  # type: ignore[misc]
         if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_reward"):
             return
         if not interaction.guild:
@@ -328,6 +424,7 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
 
 def _end_tracker(db_path: str, channel_id: int) -> None:
     import sqlite3
+
     with sqlite3.connect(db_path, timeout=10) as conn:
         conn.execute("DELETE FROM dnd_initiative_trackers WHERE channel_id=?", (int(channel_id),))
 
