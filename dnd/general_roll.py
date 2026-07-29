@@ -88,7 +88,7 @@ def build_general_embed(
     fields.append(
         {
             "name": "\u200b",
-            "value": "[Website](https://realmofdarkness.app/) | [Commands](https://realmofdarkness.app/20th/commands/) | [Patreon](https://www.patreon.com/MiraiMiki)",
+            "value": "[Commands](https://www.patreon.com/MiraiMiki)",
             "inline": False,
         }
     )
@@ -97,7 +97,7 @@ def build_general_embed(
         "title": "General Roll",
         "color": color,
         "fields": fields,
-        "url": "https://realmofdarkness.app/",
+        "url": "https://www.patreon.com/MiraiMiki",
     }
     if author_name:
         embed["author"] = {"name": author_name}
