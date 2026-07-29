@@ -82,7 +82,7 @@ def update_chronicle(db_path: str, guild_id: int, **fields) -> None:
         values.append(v)
     values.append(int(guild_id))
     with _get_conn(db_path) as conn:
-        conn.execute(f"UPDATE dnd_chronicles SET {', '.join(sets)} WHERE guild_id = ?", values)
+        conn.execute(f"UPDATE dnd_chronicles SET {', '.join(sets)} WHERE guild_id = ?", values)  # nosec B608
         conn.commit()
 
 

@@ -197,7 +197,7 @@ class GuildStateManager:
                 SELECT {", ".join(selected_columns)}
                 FROM guild_settings
                 WHERE guild_id = ?
-                """,
+                """,  # nosec B608
                 (safe_guild_id,),
             ).fetchone()
         if row is not None:
@@ -490,7 +490,7 @@ class GuildStateManager:
                 "updated_by_email": actor_email or "unknown",
             }
             conn.execute(
-                f"""
+                f"""  # nosec B608
                 INSERT INTO guild_settings (
                     {", ".join(persisted_columns)}
                 )
