@@ -2970,7 +2970,7 @@ PAGE_TEMPLATE = """
           <div class="mb-3">
             <label class="form-label" for="dnd_category_id">DND Allowed Category</label>
             <select class="form-select" id="dnd_category_id" name="dnd_category_id" {% if not can_manage_guild %}disabled{% endif %}>
-              <option value="">All categories allowed</option>
+              <option value="" {% if not selected_dnd_category_id %}selected{% endif %}>-- No Category Selected --</option>
               {% for channel in notification_channels %}
               {% if channel.type == 'category' %}
               <option value="{{ channel.id }}" {% if selected_dnd_category_id == channel.id|string %}selected{% endif %}>
