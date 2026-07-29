@@ -365,7 +365,7 @@ def test_login_not_blocked_by_same_origin_policy(tmp_path: Path, monkeypatch) ->
 def test_select_guild_not_blocked_by_same_origin_policy(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
     monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
-    monkeypatch.setenv("GUILD_ID", "123456789012345678")
+    monkeypatch.setenv("GUILD_ID", "999888777666555444")
     app = create_app(str(tmp_path / "actions.db"), _bot_snapshot)
     client = app.test_client()
     csrf_token = _login(client)
@@ -373,7 +373,7 @@ def test_select_guild_not_blocked_by_same_origin_policy(tmp_path: Path, monkeypa
     response = client.post(
         "/admin/select-guild",
         data={
-            "guild_id": "123456789012345678",
+            "guild_id": "999888777666555444",
             "next_endpoint": "home",
         },
         headers={
@@ -435,7 +435,7 @@ def test_youtube_subscription_add_and_render(tmp_path: Path, monkeypatch) -> Non
     def resolver(_url: str) -> dict:
         return {
             "source_url": "https://www.youtube.com/@example",
-            "channel_id": "UC1234567890123456789012",
+            "channel_id": "UC9998887776665554449012",
             "channel_title": "Example Channel",
             "last_video_id": "video123",
             "last_video_title": "Example Upload",
@@ -1398,7 +1398,7 @@ def test_admin_cannot_make_self_read_only(tmp_path: Path, monkeypatch) -> None:
 def test_read_only_user_can_view_portal_but_cannot_modify_it(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
     monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
-    monkeypatch.setenv("GUILD_ID", "123456789012345678")
+    monkeypatch.setenv("GUILD_ID", "999888777666555444")
 
     def get_discord_catalog(_guild_id: int) -> dict:
         return {
@@ -1494,7 +1494,7 @@ def test_read_only_user_can_view_portal_but_cannot_modify_it(tmp_path: Path, mon
 
     select_response = client.post(
         "/admin/select-guild",
-        data={"guild_id": "123456789012345678", "next_endpoint": "users"},
+        data={"guild_id": "999888777666555444", "next_endpoint": "users"},
         headers={"X-CSRF-Token": readonly_csrf},
         follow_redirects=False,
     )
@@ -1605,6 +1605,142 @@ def test_password_rotation_forces_account_update(tmp_path: Path, monkeypatch) ->
 
     assert updated_response.status_code == 200
     assert b"Account updated." in updated_response.data
+
+
+def test_account_profile_update_saves_optional_discord_user_id(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+    db_path = tmp_path / "actions.db"
+    app = create_app(str(db_path), _bot_snapshot)
+    client = app.test_client()
+    csrf_token = _login(client)
+
+    response = client.post(
+        "/admin/account",
+        data={
+            "action": "profile",
+            "email": "owner@example.com",
+            "first_name": "Wicked",
+            "last_name": "Yoda",
+            "discord_user_id": "999888777666555444",
+            "current_password": "TestPass123!",
+        },
+        headers={"X-CSRF-Token": csrf_token},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Profile updated." in response.data
+    assert b'value="999888777666555444"' in response.data
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT email, first_name, last_name, discord_user_id FROM web_users WHERE email = ?",
+            ("owner@example.com",),
+        ).fetchone()
+
+    assert row == ("owner@example.com", "Wicked", "Yoda", 999888777666555444)
+
+
+def test_account_password_update_preserves_existing_discord_user_id(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+    db_path = tmp_path / "actions.db"
+    app = create_app(str(db_path), _bot_snapshot)
+    client = app.test_client()
+    csrf_token = _login(client)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE web_users SET discord_user_id = ? WHERE email = ?",
+            (987654321098765432, "admin@example.com"),
+        )
+        conn.commit()
+
+    profile_response = client.post(
+        "/admin/account",
+        data={
+            "action": "profile",
+            "email": "admin@example.com",
+            "first_name": "Web",
+            "last_name": "Admin",
+            "discord_user_id": "",
+            "current_password": "TestPass123!",
+        },
+        headers={"X-CSRF-Token": csrf_token},
+        follow_redirects=True,
+    )
+    assert profile_response.status_code == 200
+    assert b"Profile updated." in profile_response.data
+
+    password_response = client.post(
+        "/admin/account",
+        data={
+            "action": "password",
+            "current_password": "TestPass123!",
+            "new_password": "UpdatedPass123!",
+            "confirm_new_password": "UpdatedPass123!",
+        },
+        headers={"X-CSRF-Token": csrf_token},
+        follow_redirects=True,
+    )
+    assert password_response.status_code == 200
+    assert b"Password updated." in password_response.data
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT discord_user_id FROM web_users WHERE email = ?",
+            ("admin@example.com",),
+        ).fetchone()
+
+    assert row == (987654321098765432,)
+    with sqlite3.connect(db_path) as conn:
+        rendered = conn.execute(
+            "SELECT discord_user_id FROM web_users WHERE email = ?",
+            ("admin@example.com",),
+        ).fetchone()[0]
+    assert rendered == 987654321098765432
+
+
+def test_account_profile_update_clears_blank_discord_user_id_when_explicitly_provided(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+    db_path = tmp_path / "actions.db"
+    app = create_app(str(db_path), _bot_snapshot)
+    client = app.test_client()
+    csrf_token = _login(client)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE web_users SET discord_user_id = ? WHERE email = ?",
+            (111111111111111111, "admin@example.com"),
+        )
+        conn.commit()
+
+    response = client.post(
+        "/admin/account",
+        data={
+            "action": "profile",
+            "email": "admin@example.com",
+            "first_name": "Web",
+            "last_name": "Admin",
+            "discord_user_id": "",
+            "current_password": "TestPass123!",
+        },
+        headers={"X-CSRF-Token": csrf_token},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Profile updated." in response.data
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT discord_user_id FROM web_users WHERE email = ?",
+            ("admin@example.com",),
+        ).fetchone()
+
+    assert row == (111111111111111111,)
 
 
 def test_users_add_rejects_weak_password(tmp_path: Path, monkeypatch) -> None:

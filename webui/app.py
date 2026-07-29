@@ -4719,7 +4719,7 @@ def create_app(
             first_name = request.form.get("first_name", "").strip()
             last_name = request.form.get("last_name", "").strip()
             raw_discord_user_id = request.form.get("discord_user_id", "").strip()
-            discord_user_id = raw_discord_user_id if raw_discord_user_id.isdigit() else None
+            discord_user_id = int(raw_discord_user_id) if raw_discord_user_id.isdigit() else user.get("discord_user_id")
             password_rotation_required = bool(session.get("password_rotation_required"))
             if not check_password_hash(str(user["password_hash"]), current_password):
                 flash("Current password is incorrect.", "danger")
