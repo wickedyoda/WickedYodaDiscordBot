@@ -50,3 +50,4 @@ When running the `dnd` branch:
 * Ensure the checked-out repo contains the `dnd/` package directory
 * Ensure the container image or bind mount includes `dnd/`
 * `/dnd` commands initialize schema from `/app/data/dnd.db` at runtime
+2026-07-29 refresh
