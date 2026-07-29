@@ -329,20 +329,119 @@ Roll commands support RPG presets plus dice expression input. See `/roll` for cu
   - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`
   - Logs success/failure to configured guild log channel (or global `Bot_Log_Channel` fallback) and SQLite action history
 
-## `/dnd`
-- Description: D&D 20th Anniversary helper command group.
-- Required user permissions: command-permission policy applies
+## `/dnd roll`
+- Description: Roll dice for the 20th Anniversary Edition ruleset.
+- Parameters:
+  - `pool` (`int`)
+  - `difficulty` (`int`)
+  - `willpower` (`bool`, optional)
+  - `modifier` (`int`, optional)
+  - `speciality` (`str`, optional)
+  - `nightmare` (`int`, optional)
+  - `no_botch` (`bool`, optional)
+  - `character` (`str`, optional)
+  - `notes` (`str`, optional)
+- Required user permissions: command-permission policy applies via `ensure_interaction_command_access`
 - Bot action:
-  - Uses local SQLite storage
-  - Reply visibility follows `COMMAND_RESPONSES_EPHEMERAL`
-  - Schema is initialized automatically at runtime
-  - Logs actions to SQLite action history
-- Subcommands:
-  - `/dnd character` - manage guild D&D character records
-  - `/dnd session` - track story sessions with outcomes
-  - `/dnd proxy` - record session proxies for absent players
-  - `/dnd xp` - add/record XP transactions per character
-  - `/dnd reward` - assign rewards/boons tied to character or session
+  - Validates pool, difficulty, and nightmare dice
+  - Rolls via `dnd.roll_20th` rules
+  - Optionally resolves a saved character name by prefix match
+  - Sends a dice result embed or falls back to successes text
+  - Logs `dnd_roll` interactions
+
+## `/dnd general`
+- Description: General multi-set dice roll.
+- Parameters:
+  - `dice_set_01` (`str`)
+  - `modifier` (`int`, optional)
+  - `dice_set_02` (`str`, optional)
+  - `dice_set_03` (`str`, optional)
+  - `dice_set_04` (`str`, optional)
+  - `dice_set_05` (`str`, optional)
+  - `difficulty` (`str`, optional)
+  - `notes` (`str`, optional)
+- Required user permissions: command-permission policy applies via `ensure_interaction_command_access`
+- Bot action:
+  - Parses up to five dice sets
+  - Builds a multi-set result embed
+  - Logs `dnd_general` interactions
+
+## `/dnd initiative`
+- Description: Channel-scoped initiative tracker.
+- Parameters:
+  - `action` (`str`) - `new`, `roll`, or `end`
+  - `dex_wits` (`int`, optional)
+  - `character` (`str`, optional)
+  - `notes` (`str`, optional)
+- Required user permissions: guild context required
+- Bot action:
+  - `new` creates a per-channel initiative tracker in SQLite
+  - `roll` appends a new initiative entry and shows turn order
+  - `end` removes the tracker for the current channel
+  - Tracker state is persisted in `/app/data/dnd.db`
+
+## `/dnd character`
+- Description: Saved character lookup and sheet helpers.
+- Parameters:
+  - `action` (`str`) - `find`, `show`, `sheet`, `list`, `save`, or `delete`
+  - `splat` (`str`, optional)
+  - `name` (`str`, optional)
+  - `payload` (`str`, optional)
+- Required user permissions: guild context required for non-`show` actions
+- Bot action:
+  - Reads/writes character records in SQLite
+  - `sheet` shows splat-specific fields when available
+  - Chronicle `allowed_splats` can restrict visible/allowed splats
+
+## `/dnd proxy`
+- Description: Proxy identity helpers for absent players.
+- Parameters:
+  - `action` (`str`) - `create`, `send`, `reply`, `list`, or `delete`
+  - `name` (`str`)
+  - `template` (`str`, optional)
+  - `avatar_url` (`str`, optional)
+  - `message` (`str`, optional)
+- Required user permissions: guild context required
+- Bot action:
+  - `create` stores a proxy identity
+  - `send` posts a proxied message with template substitution
+  - `reply` confirms proxy availability in the current channel
+  - `list` shows saved proxies
+  - `delete` removes a saved proxy
+
+## `/dnd chronicle`
+- Description: Guild chronicle configuration view/update.
+- Parameters:
+  - `action` (`str`) - `create`, `show`, or `update`
+  - `name` (`str`, optional)
+- Required user permissions: guild context required
+- Bot action:
+  - Creates or updates the guild chronicle row
+  - `show` reports name, XP tracking, auto rewards, monitored channels, and excluded channels
+
+## `/dnd xp`
+- Description: Guild XP tracking helpers.
+- Parameters:
+  - `action` (`str`) - `add` or `history`
+  - `amount` (`float`, optional)
+  - `reason` (`str`, optional)
+- Required user permissions: guild context required
+- Bot action:
+  - `add` increments the guild/user XP pool and records an entry
+  - `history` returns the most recent XP entries
+
+## `/dnd reward`
+- Description: Auto reward rule helpers tied to XP activity.
+- Parameters:
+  - `action` (`str`) - `create`, `status`, or `ledger`
+  - `rule_name` (`str`, optional)
+  - `threshold` (`int`, optional)
+  - `reward` (`float`, optional)
+- Required user permissions: guild context required
+- Bot action:
+  - `create` creates a reward rule/tier
+  - `status` evaluates reward progress against recent XP history
+  - `ledger` shows reward evaluation details
 
 ## Social / Fun
 
