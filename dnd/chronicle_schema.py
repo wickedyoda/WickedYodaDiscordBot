@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-import json
 import sqlite3
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Optional
-
 
 _INIT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS dnd_chronicles (

@@ -9,8 +9,6 @@ REACTION_ROLE_STATUS_OPTIONS = (
     {"value": "paused", "label": "Paused"},
     {"value": "disabled", "label": "Disabled"},
 )
-
-
 def process_reaction_roles_submission(*, form, on_manage_reaction_roles, actor_email: str, selected_guild_id: str):
     messages: list[tuple[str, str]] = []
     if not callable(on_manage_reaction_roles):
@@ -37,8 +35,6 @@ def process_reaction_roles_submission(*, form, on_manage_reaction_roles, actor_e
 
     messages.append((str(response.get("message") or "Reaction role mappings updated."), "success"))
     return response, messages
-
-
 def render_reaction_roles_body(
     *,
     guild_name: str,
@@ -62,12 +58,6 @@ def render_reaction_roles_body(
         for option in channel_options
         if str(option.get("id") or "").strip()
     }
-    role_labels = {
-        str(option.get("id") or "").strip(): str(option.get("label") or option.get("name") or option.get("id") or "").strip()
-        for option in role_options
-        if str(option.get("id") or "").strip()
-    }
-
     rows = []
     for mapping in mappings:
         channel_id = str(mapping.get("channel_id") or "")
@@ -78,7 +68,7 @@ def render_reaction_roles_body(
         created_at = format_timestamp_display(mapping.get("created_at"))
         updated_at = format_timestamp_display(mapping.get("updated_at"))
         channel_label = channel_labels.get(channel_id, channel_id or "n/a")
-        role_label = role_labels.get(role_id, role_id or "n/a")
+
         rows.append(
             f"""
             <tr>

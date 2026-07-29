@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import datetime
-from typing import List, Optional
 
 from dnd.chronicle_schema import _get_conn
 
 
 def _utc_now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return datetime.datetime.now(datetime.UTC).isoformat()
 
 
 def create_proxy(db_path: str, guild_id: int, owner_id: int, name: str, template: str = "", thumbnail_url: str = "", avatar_url: str = "", description: str = "") -> dict:
@@ -24,13 +23,13 @@ def create_proxy(db_path: str, guild_id: int, owner_id: int, name: str, template
     return dict(row)
 
 
-def get_proxy(db_path: str, guild_id: int, owner_id: int, name: str) -> Optional[dict]:
+def get_proxy(db_path: str, guild_id: int, owner_id: int, name: str) -> dict | None:
     with _get_conn(db_path) as conn:
         row = conn.execute("SELECT * FROM dnd_proxies WHERE guild_id=? AND owner_id=? AND name=?", (int(guild_id), int(owner_id), name)).fetchone()
         return dict(row) if row else None
 
 
-def list_proxies(db_path: str, guild_id: int, owner_id: int) -> List[dict]:
+def list_proxies(db_path: str, guild_id: int, owner_id: int) -> list[dict]:
     with _get_conn(db_path) as conn:
         rows = conn.execute("SELECT * FROM dnd_proxies WHERE guild_id=? AND owner_id=? ORDER BY id ASC", (int(guild_id), int(owner_id))).fetchall()
         return [dict(r) for r in rows]

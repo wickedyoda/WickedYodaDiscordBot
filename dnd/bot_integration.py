@@ -2,35 +2,50 @@ from __future__ import annotations
 
 import datetime
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from dnd import characters as character_repo
-from dnd import chronicle_service
-from dnd import general_roll
+import discord
+from discord import app_commands
+
+from dnd import chronicle_service, general_roll
 from dnd import initiative as initiative_domain
-from dnd.characters import delete_character as delete_char_repo, find_character, list_characters, save_character
-from dnd.chronicle_service import add_xp, create_reward_rule, evaluate_rewards, get_chronicle, list_xp_entries, update_chronicle, upsert_member, upsert_reward_tier
-from dnd.initiative_repo import load_tracker, save_tracker
-from dnd.proxy_service import add_proxy_identity, create_proxy, delete_proxy, get_proxy, list_proxies
 from dnd import roll_20th as d20
+from dnd.characters import delete_character as delete_char_repo
+from dnd.characters import find_character, list_characters, save_character
+from dnd.chronicle_service import (
+    add_xp,
+    create_reward_rule,
+    evaluate_rewards,
+    list_xp_entries,
+    upsert_reward_tier,
+)
+from dnd.initiative_repo import load_tracker, save_tracker
+from dnd.proxy_service import (
+    add_proxy_identity,
+    delete_proxy,
+    get_proxy,
+    list_proxies,
+)
+
+bound: dict[str, Any] | None = None
 
 DND_DB_PATH = "/app/data/dnd.db"
 
 
 def _utc_now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return datetime.datetime.now(datetime.UTC).isoformat()
 
 
 def ensure_dnd_schema() -> None:
-    from dnd.chronicle_schema import ensure_schema as ensure_chronicle_schema
     from dnd.characters import ensure_schema as ensure_character_schema
+    from dnd.chronicle_schema import ensure_schema as ensure_chronicle_schema
     from dnd.initiative_repo import ensure_schema as ensure_init_schema
     ensure_chronicle_schema(DND_DB_PATH)
     ensure_character_schema(DND_DB_PATH)
     ensure_init_schema(DND_DB_PATH)
 
 
-def _get_db_rows(db_path: str, sql: str, params: tuple) -> List[dict]:
+def _get_db_rows(db_path: str, sql: str, params: tuple) -> list[dict]:
     import sqlite3
 
     conn = sqlite3.connect(db_path, timeout=10)
@@ -40,7 +55,7 @@ def _get_db_rows(db_path: str, sql: str, params: tuple) -> List[dict]:
     return [dict(row) for row in rows]
 
 
-def _parse_json_list(raw: str) -> List[str]:
+def _parse_json_list(raw: str) -> list[str]:
     try:
         data = json.loads(raw or "[]")
     except Exception:
@@ -50,13 +65,13 @@ def _parse_json_list(raw: str) -> List[str]:
     return []
 
 
-def _allowed_splats(db_path: str, guild_id: int) -> List[str]:
+def _allowed_splats(db_path: str, guild_id: int) -> list[str]:
     rows = _get_db_rows(db_path, "SELECT allowed_splats FROM dnd_chronicles WHERE guild_id=?", (int(guild_id),))
     fallback = '["vampire20th"]'
     return _parse_json_list(rows[0]["allowed_splats"] if rows else fallback)
 
 
-def _sheet_fields_for_splat(splat: str, name: str, data: dict) -> List[str]:
+def _sheet_fields_for_splat(splat: str, name: str, data: dict) -> list[str]:
     if splat in {"vampire20th", "vampire"}:
         return [f"**{name}** - Vampire 20th", f"- Generation: {data.get('generation', '?')}", f"- Clan: {data.get('clan', '?')}", f"- Blood Pool: {data.get('blood', '?')}", f"- Embrace: {data.get('embrace', '?')}", f"- Sire: {data.get('sire', '?')}", f"- Path: {data.get('path', '?')}"]
     if splat in {"werewolf", "garou"}:
@@ -75,7 +90,7 @@ def _sheet_fields_for_splat(splat: str, name: str, data: dict) -> List[str]:
     return fields
 
 
-def register_dnd_commands(bot: Any, helpers: Optional[dict[str, Any]] = None) -> None:
+def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> None:
     bound: dict[str, Any] = {
         "reply_ephemeral": None,
         "log_interaction": None,
@@ -433,36 +448,34 @@ async def _run_proxy_command(interaction: Any, *, action: str, name: str, templa
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Provide a proxy name.")
             return
-        proxy = proxy_service.add_proxy_identity(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), name, name, avatar_url=avatar_url)
+        proxy = add_proxy_identity(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), name, name, avatar_url=avatar_url)
         if reply_ephemeral:
             await reply_ephemeral(interaction, f"Proxy `{proxy['name']}` created.")
-        await _log(interaction, "dnd_proxy_create", f"name={name}")
     elif action == "send":
         if not name or message is None:
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Provide a proxy name and message.")
             return
-        proxy = proxy_service.get_proxy(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), name)
+        proxy = get_proxy(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), name)
         if not proxy:
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Proxy not found. Create it first.")
             return
         content = template.replace("{name}", proxy.get("name", name)).replace("{content}", message)
         await interaction.channel.send(content)
-        await _log(interaction, "dnd_proxy_send", f"name={name}")
     elif action == "reply":
         if not name:
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Provide a proxy name for auto-reply.")
             return
-        proxy = proxy_service.get_proxy(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), name)
+        proxy = get_proxy(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), name)
         if not proxy:
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Proxy not found.")
             return
         await interaction.response.send_message(f"Auto-reply proxy `{name}` is active in this channel.", ephemeral=True)
     elif action == "list":
-        proxies = proxy_service.list_proxies(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id))
+        proxies = list_proxies(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id))
         if not proxies:
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "You have no proxies.")
@@ -477,7 +490,7 @@ async def _run_proxy_command(interaction: Any, *, action: str, name: str, templa
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Provide a proxy name to delete.")
             return
-        deleted = proxy_service.delete_proxy(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), name)
+        deleted = delete_proxy(DND_DB_PATH, int(interaction.guild.id), int(interaction.user.id), name)
         if reply_ephemeral:
             await reply_ephemeral(interaction, "Proxy deleted." if deleted else "Proxy not found.")
     else:

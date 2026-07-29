@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import json
 import datetime
-from typing import List, Optional
+import json
 
 from dnd.chronicle_schema import _get_conn
 
@@ -10,7 +9,7 @@ _DEFAULT_TIMESTAMP = "1970-01-01T00:00:00"
 
 
 def _utc_now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return datetime.datetime.now(datetime.UTC).isoformat()
 
 
 def _ensure_guild(db_path: str, guild_id: int, owner_id: int = 0, name: str = "Chronicle") -> None:
@@ -23,7 +22,7 @@ def _ensure_guild(db_path: str, guild_id: int, owner_id: int = 0, name: str = "C
         conn.commit()
 
 
-def get_chronicle(db_path: str, guild_id: int) -> Optional[dict]:
+def get_chronicle(db_path: str, guild_id: int) -> dict | None:
     with _get_conn(db_path) as conn:
         row = conn.execute("SELECT * FROM dnd_chronicles WHERE guild_id = ?", (int(guild_id),)).fetchone()
         if not row:
@@ -87,7 +86,7 @@ def update_chronicle(db_path: str, guild_id: int, **fields) -> None:
         conn.commit()
 
 
-def list_members(db_path: str, guild_id: int) -> List[dict]:
+def list_members(db_path: str, guild_id: int) -> list[dict]:
     with _get_conn(db_path) as conn:
         rows = conn.execute("SELECT * FROM dnd_chronicle_members WHERE guild_id = ?", (int(guild_id),)).fetchall()
         return [
@@ -142,7 +141,7 @@ def get_xp_balance(db_path: str, guild_id: int, user_id: int) -> float:
         return float(row["pool"]) if row else 0.0
 
 
-def list_xp_entries(db_path: str, guild_id: int, user_id: int, limit: int = 50) -> List[dict]:
+def list_xp_entries(db_path: str, guild_id: int, user_id: int, limit: int = 50) -> list[dict]:
     with _get_conn(db_path) as conn:
         rows = conn.execute(
             "SELECT id, guild_id, user_id, amount, reason, created_at FROM dnd_xp_entries WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT ?",
@@ -176,17 +175,17 @@ def upsert_reward_tier(db_path: str, rule_id: int, idx: int = 0, threshold: int 
         conn.commit()
 
 
-def list_reward_rules(db_path: str, guild_id: int) -> List[dict]:
+def list_reward_rules(db_path: str, guild_id: int) -> list[dict]:
     with _get_conn(db_path) as conn:
         rows = conn.execute("SELECT * FROM dnd_reward_rules WHERE guild_id=?", (int(guild_id),)).fetchall()
         return [dict(r) for r in rows]
 
 
-def evaluate_rewards(db_path: str, guild_id: int, user_id: int) -> List[dict]:
+def evaluate_rewards(db_path: str, guild_id: int, user_id: int) -> list[dict]:
     guild_id = int(guild_id)
     user_id = int(user_id)
     rules = list_reward_rules(db_path, guild_id)
-    results: List[dict] = []
+    results: list[dict] = []
     for rule in rules:
         if not rule.get("enabled", 1):
             continue

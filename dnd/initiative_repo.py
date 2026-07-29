@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Optional
 
-from .initiative import InitiativeTracker, InitiativeCharacter
-
+from .initiative import InitiativeCharacter, InitiativeTracker
 
 _INIT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS dnd_initiative_trackers (
@@ -32,7 +30,7 @@ def ensure_schema(db_path: str) -> None:
         conn.commit()
 
 
-def load_tracker(db_path: str, channel_id: int) -> Optional[InitiativeTracker]:
+def load_tracker(db_path: str, channel_id: int) -> InitiativeTracker | None:
     with _get_conn(db_path) as conn:
         row = conn.execute(
             "SELECT guild_id, owner_id, json FROM dnd_initiative_trackers WHERE channel_id = ?",

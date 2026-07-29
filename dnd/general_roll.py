@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass, field
-from typing import List
 
 
 @dataclass
 class DiceSet:
     sides: int = 0
     dice: int = 0
-    results: List[int] = field(default_factory=list)
+    results: list[int] = field(default_factory=list)
 
 
 def roll_one(sides: int) -> int:
