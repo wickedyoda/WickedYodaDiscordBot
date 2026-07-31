@@ -74,9 +74,21 @@ def build_derived(edition: str, fields: Dict[str, Any]) -> Dict[str, Any]:
     proficiency = 2 + max(0, level - 1) // 4
     speed = _to_int(fields.get("speed") or 30)
     passive = 10 + _to_int(fields.get("passive_perception") or 0)
+    skills = _clean_list(fields.get("skills"))
+    equipment = _clean_list(fields.get("equipment"))
+    weapons = _clean_list(fields.get("weapons"))
+    cantrips = _clean_list(fields.get("cantrips"))
+    spells = _clean_list(fields.get("spells"))
+    spell_slots = _to_int(fields.get("spell_slots"))
+    armor_name = fields.get("armor") or ""
+    shield_name = fields.get("shield") or ""
+    ac_override = _to_int(fields.get("ac"))
+    final_ac = ac_override if ac_override else ac
+    cover = _to_int(fields.get("ac_cover") or 0)
+    final_ac = final_ac + cover
     derived.update(
         {
-            "ac": ac,
+            "ac": final_ac,
             "max_hp": max_hp,
             "current_hp": _to_int(fields.get("current_hp") or derived["max_hp"]),
             "hit_die": hit_die,
@@ -84,9 +96,14 @@ def build_derived(edition: str, fields: Dict[str, Any]) -> Dict[str, Any]:
             "proficiency": proficiency,
             "speed": speed,
             "passive_perception": passive,
-            "armor": fields.get("armor") or "",
-            "shield": fields.get("shield") or "",
-            "weapons": _clean_list(fields.get("weapons")),
+            "armor": armor_name,
+            "shield": shield_name,
+            "weapons": weapons,
+            "skills": skills,
+            "equipment": equipment,
+            "cantrips": cantrips,
+            "spells": spells,
+            "spell_slots": spell_slots,
         }
     )
     return derived
@@ -116,6 +133,21 @@ def render_derived(edition: str, derived: Dict[str, Any]) -> str:
     weapons = derived.get("weapons") or []
     if weapons:
         lines.append("Weapons: " + ", ".join(weapons))
+    skills = derived.get("skills") or []
+    if skills:
+        lines.append("Skills: " + ", ".join(skills))
+    equipment = derived.get("equipment") or []
+    if equipment:
+        lines.append("Equipment: " + ", ".join(equipment))
+    cantrips = derived.get("cantrips") or []
+    if cantrips:
+        lines.append("Cantrips: " + ", ".join(cantrips))
+    spells = derived.get("spells") or []
+    if spells:
+        lines.append("Spells: " + ", ".join(spells))
+    spell_slots = derived.get("spell_slots")
+    if spell_slots:
+        lines.append(f"Spell Slots: {spell_slots}")
     return "\n".join(lines)
 
 
