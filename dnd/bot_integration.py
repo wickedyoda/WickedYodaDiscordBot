@@ -14,6 +14,8 @@ from dnd import characters as character_service
 from dnd.chronicle_service import add_xp, create_reward_rule, evaluate_rewards, get_chronicle, list_xp_entries, update_chronicle, upsert_member, upsert_reward_tier
 from dnd.roll_router import route_roll, RollError
 from dnd.debug_logger import get_logger, log_command
+from dnd.character_derived import build_derived, render_ability_block, render_derived
+from dnd.editions import _edition_for_splat
 
 DND_DB_PATH = "/app/data/dnd.db"
 DEBUG_LOGGER = get_logger("wickedyoda.dnd")
@@ -355,15 +357,18 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 DEBUG_LOGGER.debug("REJECT /dnd character show missing name=%s", target_name)
                 return
             data = record.get("data", {})
+            fields = data.get("fields") or {}
+            splat_for_edition = record.get("splat") or ""
+            splat_edition = _edition_for_splat(splat_for_edition)
+            edition_key = edition or (splat_edition.key if splat_edition else "custom")
+            derived = build_derived(edition_key, fields)
             lines = [
-                f"Character: {record['name']}",
-                f"Splat/species: {record['splat']}",
-                "Fields:",
+                f"**{record['name']}** | {record['splat']} | {_edition_label(edition_key)}",
+                render_ability_block(edition_key, derived),
+                render_derived(edition_key, derived),
             ]
-            for k, v in (data.get("fields") or {}).items():
-                lines.append(f"- {k}: {v or ''}")
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
-            DEBUG_LOGGER.debug("ACCEPT /dnd character show name=%s", target_name)
+            DEBUG_LOGGER.debug("ACCEPT /dnd character show name=%s edition=%s", target_name, edition_key)
         elif action == "edit":
             target_name = name.strip()
             if not target_name or not field:

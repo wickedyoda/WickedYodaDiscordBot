@@ -192,6 +192,11 @@ def is_splat_allowed(edition_key: str, splat: str) -> bool:
     return splat in edition.default_splats
 
 
+def _edition_label(edition: str) -> str:
+    info = get_edition(edition)
+    return info.label if info else edition
+
+
 def _edition_for_splat(splat: str) -> Optional[EditionInfo]:
     for edition in _EDITIONS.values():
         if splat in edition.default_splats:
