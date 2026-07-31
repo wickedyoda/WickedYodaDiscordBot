@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from dnd.wiki_reference import WIKI_REFERENCE_URL, WIKI_SUMMARY
+
 
 @dataclass
 class EditionInfo:

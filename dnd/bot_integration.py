@@ -10,7 +10,9 @@ from dnd import character_builder
 from dnd import editions
 from dnd import proxy_group_service
 from dnd import proxy_service
+from dnd import characters as character_service
 from dnd.chronicle_service import add_xp, create_reward_rule, evaluate_rewards, get_chronicle, list_xp_entries, update_chronicle, upsert_member, upsert_reward_tier
+from dnd.roll_router import route_roll, RollError
 from dnd.debug_logger import get_logger, log_command
 
 DND_DB_PATH = "/app/data/dnd.db"
@@ -146,6 +148,18 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             )
             return
         DEBUG_LOGGER.debug("ACCEPT /dnd roll edition=%s system=%s", edition, system)
+        try:
+            result = route_roll(edition=edition, system=system, pool=pool, difficulty=difficulty, modifier=modifier)
+            lines = [
+                f"Roll `{system}` for {_edition_label(edition)}: pool={result['pool']} diff={result['difficulty']}",
+                f"Dice: {', '.join(str(x) for x in result['dice'])}",
+                f"Successes: {result['successes']} | Outcome: {result['outcome']}",
+            ]
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd roll result successes=%s outcome=%s", result.get("successes"), result.get("outcome"))
+        except RollError as exc:
+            DEBUG_LOGGER.debug("ERROR /dnd roll router=%s", exc, exc_info=True)
+            await interaction.response.send_message(f"Roll error: {exc}", ephemeral=True)
         await _log(interaction, "dnd_roll", f"system={system} pool={pool} diff={difficulty}", success=True)
 
     @roll.autocomplete("system")
@@ -192,17 +206,16 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         if sheet_supported:
             DEBUG_LOGGER.debug("EXECUTE /dnd sheet system=%s hunger=%s", system, bool(discipline))
             try:
-                from dnd.roll_5th import build_sheet_pool, roll_sheet_pool as _roll_sheet_pool
-                pool = 3 + int(modifier or 0)
-                result = _roll_sheet_pool(pool=pool, difficulty=difficulty, hunger=bool(discipline), modifier=0)
+                result = route_roll(edition=edition, system=system or edition, pool=3 + int(modifier or 0), difficulty=difficulty, hunger=bool(discipline))
+                if discipline:
+                    result["outcome"] = result.get("outcome", "") + " (Hunger)"
                 lines = [
-                    f"Sheet roll for `{edition}`: pool={result.pool} diff={difficulty}",
-                    f"Dice: {result.dice}",
-                    f"Successes: {result.successes}",
-                    f"Outcome: {result.outcome}",
+                    f"Sheet roll for `{edition}`: pool={result['pool']} diff={difficulty}",
+                    f"Dice: {', '.join(str(x) for x in result['dice'])}",
+                    f"Successes: {result['successes']} | Outcome: {result['outcome']}",
                 ]
                 await interaction.response.send_message("\n".join(lines), ephemeral=True)
-            except Exception as exc:  # pragma: no cover
+            except RollError as exc:
                 DEBUG_LOGGER.debug("ERROR /dnd sheet engine=%s", exc, exc_info=True)
                 await interaction.response.send_message(f"Sheet roll engine error: {exc}", ephemeral=True)
         else:
@@ -286,9 +299,9 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         await _log(interaction, "dnd_info", f"topic={topic} choice={choice}", success=True)
 
     @dnd.command(name="character", description="Edition-aware character helpers.")
-    async def character(interaction: Any, action: str = "show", name: str = "", splat: str = "") -> None:  # type: ignore[misc]
-        DEBUG_LOGGER.debug("ENTER /dnd character action=%s name=%s splat=%s", action, name, splat)
-        log_command(DEBUG_LOGGER, interaction, "character", action=action, name=name, splat=splat)
+    async def character(interaction: Any, action: str = "show", name: str = "", splat: str = "", field: str = "", value: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd character action=%s name=%s splat=%s field=%s value=%s", action, name, splat, field, value)
+        log_command(DEBUG_LOGGER, interaction, "character", action=action, name=name, splat=splat, field=field, value=value)
         if await _enforce_setup(interaction):
             DEBUG_LOGGER.debug("BLOCKED /dnd character setup not complete")
             return
@@ -316,6 +329,8 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 return
             upsert_member(DND_DB_PATH, guild_id, user_id, name=name)
             template = character_builder.sheet_template(splat_key)
+            payload = {"splat": splat_key, "fields": template}
+            character_service.save_character(DND_DB_PATH, guild_id, user_id, splat_key, name, payload)
             lines = [
                 f"Created character `{name}` for `{splat_key}`.",
                 "Template fields: " + ", ".join(template.keys()),
@@ -323,20 +338,62 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
             DEBUG_LOGGER.debug("ACCEPT /dnd character create name=%s splat=%s template_fields=%d", name, splat_key, len(template))
         elif action == "show":
-            members = chronicle_service.list_members(DND_DB_PATH, guild_id)
-            member = next((m for m in members if m.get("user_id") == user_id), None)
-            if not member:
-                await interaction.response.send_message("No character found for this server.", ephemeral=True)
+            target_name = name.strip()
+            if not target_name:
+                chars = character_service.list_characters(DND_DB_PATH, guild_id, user_id)
+                if not chars:
+                    await interaction.response.send_message("No characters found. Use `/dnd character create`.", ephemeral=True)
+                    DEBUG_LOGGER.debug("REJECT /dnd character show empty")
+                    return
+                lines = ["Characters:"] + [f"- {c['name']} ({c['splat']})" for c in chars]
+                await interaction.response.send_message("\n".join(lines), ephemeral=True)
+                DEBUG_LOGGER.debug("ACCEPT /dnd character show list count=%d", len(chars))
                 return
-            edition_label = _edition_label(edition)
+            record = character_service.find_character(DND_DB_PATH, guild_id, user_id, target_name)
+            if not record:
+                await interaction.response.send_message(f"Character `{target_name}` not found.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd character show missing name=%s", target_name)
+                return
+            data = record.get("data", {})
             lines = [
-                f"Member: {member.get('name')}",
-                f"Edition: {edition_label}",
-                f"Allowed splats: {', '.join(allowed)}",
+                f"Character: {record['name']}",
+                f"Splat/species: {record['splat']}",
+                "Fields:",
             ]
+            for k, v in (data.get("fields") or {}).items():
+                lines.append(f"- {k}: {v or ''}")
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd character show name=%s", target_name)
+        elif action == "edit":
+            target_name = name.strip()
+            if not target_name or not field:
+                await interaction.response.send_message("Provide `name` and `field` to edit.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd character edit missing fields")
+                return
+            record = character_service.find_character(DND_DB_PATH, guild_id, user_id, target_name)
+            if not record:
+                await interaction.response.send_message(f"Character `{target_name}` not found.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd character edit missing name=%s", target_name)
+                return
+            data = record.get("data", {})
+            fields = data.get("fields") or {}
+            fields[field] = value
+            data["fields"] = fields
+            character_service.save_character(DND_DB_PATH, guild_id, user_id, record["splat"], target_name, data)
+            await interaction.response.send_message(f"Updated `{field}` for `{target_name}`.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd character edit name=%s field=%s", target_name, field)
+        elif action == "delete":
+            target_name = name.strip()
+            if not target_name:
+                await interaction.response.send_message("Provide `name` to delete.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd character delete missing name")
+                return
+            removed = character_service.delete_character(DND_DB_PATH, guild_id, user_id, target_name)
+            await interaction.response.send_message("Deleted." if removed else "Character not found.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd character delete name=%s removed=%s", target_name, removed)
         else:
-            await interaction.response.send_message("Use `create` or `show`.", ephemeral=True)
+            DEBUG_LOGGER.debug("REJECT /dnd character bad action=%s", action)
+            await interaction.response.send_message("Use `create`, `show`, `edit`, `list`, or `delete`.", ephemeral=True)
 
     @dnd.command(name="xp", description="XP tracking helpers.")
     async def xp(interaction: Any, action: str = "add", amount: float = 1.0, reason: str = "") -> None:  # type: ignore[misc]
