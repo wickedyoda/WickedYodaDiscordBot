@@ -6009,7 +6009,7 @@ class ModerationBot(commands.Bot):
 
 bot = ModerationBot()
 birthday_group = app_commands.Group(name="birthday", description="Birthday commands")
-dnd_group = app_commands.Group(name="dnd", description="D&D 20th helper commands")
+dnd_group = app_commands.Group(name="dnd", description="Edition-aware D&D commands")
 
 
 def record_action_safe(

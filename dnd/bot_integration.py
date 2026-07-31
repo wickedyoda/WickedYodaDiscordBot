@@ -242,6 +242,7 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         ]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
         await _log(interaction, "dnd_setup", f"edition={edition}", success=True)
+        DEBUG_LOGGER.debug("ACCEPT /dnd setup edition=%s", edition)
 
     @dnd.command(name="info", description="Edition/splat reference info.")
     async def info(interaction: Any, topic: str = "edition", choice: str = "") -> None:  # type: ignore[misc]
@@ -251,6 +252,7 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             edition = choice.strip().lower() if choice else _edition_for_guild(interaction)
             if not edition:
                 await interaction.response.send_message("Specify an edition: `20th`, `5e`, `custom`.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd info missing edition")
                 return
             info_data = editions.edition_help(edition)
             reference = (
@@ -258,12 +260,14 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 f"Summary: {editions.WIKI_SUMMARY}"
             )
             await interaction.response.send_message(info_data + reference, ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd info edition=%s", edition)
         elif topic == "splat":
             splat = choice.strip()
             edition = _edition_for_guild(interaction)
             allowed = _allowed_splats_for_guild(interaction)
             if splat not in allowed and allowed:
                 await interaction.response.send_message(f"`{splat}` is not in this edition's allowed list.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd info bad splat=%s edition=%s", splat, edition)
                 return
             edition_key = edition or "custom"
             edition_info = editions.get_edition(edition_key)
@@ -273,9 +277,11 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 if meta.get("sheetSlug"):
                     lines.append(f"Sheet slug: {meta.get('sheetSlug')}")
                 await interaction.response.send_message("\n".join(lines), ephemeral=True)
+                DEBUG_LOGGER.debug("ACCEPT /dnd info splat=%s edition=%s", splat, edition_key)
             else:
                 await interaction.response.send_message(f"No metadata for `{splat}` under {_edition_label(edition_key)}.", ephemeral=True)
         else:
+            DEBUG_LOGGER.debug("REJECT /dnd info bad topic=%s choice=%s", topic, choice)
             await interaction.response.send_message("Use `info edition:<choice>` or `info splat:<choice>`.", ephemeral=True)
         await _log(interaction, "dnd_info", f"topic={topic} choice={choice}", success=True)
 
@@ -289,6 +295,7 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         if not interaction.guild:
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Use in a server.")
+            DEBUG_LOGGER.debug("REJECT /dnd character dm_context")
             return
         guild_id = int(interaction.guild.id)
         user_id = int(interaction.user.id)
