@@ -202,6 +202,35 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
         await _log(interaction, "dnd_setup", f"edition={edition}", success=True)
 
+    @dnd.command(name="info", description="Edition/splat reference info.")
+    async def info(interaction: Any, topic: str = "edition", choice: str = "") -> None:  # type: ignore[misc]
+        if topic == "edition":
+            edition = choice.strip().lower() if choice else _edition_for_guild(interaction)
+            if not edition:
+                await interaction.response.send_message("Specify an edition: `20th`, `5e`, `custom`.", ephemeral=True)
+                return
+            await interaction.response.send_message(editions.edition_help(edition), ephemeral=True)
+        elif topic == "splat":
+            splat = choice.strip()
+            edition = _edition_for_guild(interaction)
+            allowed = _allowed_splats_for_guild(interaction)
+            if splat not in allowed and allowed:
+                await interaction.response.send_message(f"`{splat}` is not in this edition's allowed list.", ephemeral=True)
+                return
+            edition_key = edition or "custom"
+            edition_info = editions.get_edition(edition_key)
+            meta = (edition_info.splat_metadata or {}).get(splat) if edition_info else None
+            if meta:
+                lines = [f"Splat: {meta.get('name', splat)}", f"Edition: {_edition_label(edition_key)}", f"Slug: {meta.get('slug', splat)}"]
+                if meta.get("sheetSlug"):
+                    lines.append(f"Sheet slug: {meta.get('sheetSlug')}")
+                await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            else:
+                await interaction.response.send_message(f"No metadata for `{splat}` under {_edition_label(edition_key)}.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Use `info edition:<choice>` or `info splat:<choice>`.", ephemeral=True)
+        await _log(interaction, "dnd_info", f"topic={topic} choice={choice}", success=True)
+
     @dnd.command(name="character", description="Edition-aware character helpers.")
     async def character(interaction: Any, action: str = "show", name: str = "", splat: str = "") -> None:  # type: ignore[misc]
         if await _enforce_setup(interaction):
