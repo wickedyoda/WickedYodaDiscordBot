@@ -139,10 +139,51 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         await _log(interaction, "dnd_roll", f"system={system} pool={pool} diff={difficulty}", success=True)
 
     @dnd.command(name="sheet", description="Roll a 5th edition sheet pool.")
-    async def sheet(interaction: Any, attribute: str, attribute2: str | None = None, skill: str | None = None, discipline: str | None = None, modifier: int = 0, difficulty: int = 6, notes: str | None = None) -> None:  # type: ignore[misc]
+    async def sheet(
+        interaction: Any,
+        attribute: str,
+        attribute2: str | None = None,
+        skill: str | None = None,
+        discipline: str | None = None,
+        splat: str = "",
+        modifier: int = 0,
+        difficulty: int = 6,
+        notes: str | None = None,
+    ) -> None:  # type: ignore[misc]
         if await _enforce_setup(interaction):
             return
-        await _log(interaction, "dnd_sheet", f"attribute={attribute} skill={skill} discipline={discipline}", success=True)
+        edition = _edition_for_guild(interaction)
+        edition_info = editions.get_edition(edition)
+        allowed = _allowed_splats_for_guild(interaction)
+        if splat and splat not in allowed:
+            label = _edition_label(edition)
+            await interaction.response.send_message(
+                f"`splat:{splat}` is not allowed under **{label}**. Choose from: {', '.join(allowed)}.",
+                ephemeral=True,
+            )
+            return
+        system = edition_info.roll_systems[0] if edition_info and edition_info.roll_systems else edition
+        sheet_supported = bool(edition_info.sheet_roll_supported) if edition_info else False
+        if sheet_supported:
+            try:
+                from dnd.roll_5th import build_sheet_pool, roll_sheet_pool as _roll_sheet_pool
+                pool = 3 + int(modifier or 0)
+                result = _roll_sheet_pool(pool=pool, difficulty=difficulty, hunger=bool(discipline), modifier=0)
+                lines = [
+                    f"Sheet roll for `{edition}`: pool={result.pool} diff={difficulty}",
+                    f"Dice: {result.dice}",
+                    f"Successes: {result.successes}",
+                    f"Outcome: {result.outcome}",
+                ]
+                await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            except Exception as exc:  # pragma: no cover
+                await interaction.response.send_message(f"Sheet roll engine error: {exc}", ephemeral=True)
+        else:
+            await interaction.response.send_message(
+                f"Sheet rolls are not enabled for **{_edition_label(edition)}**.",
+                ephemeral=True,
+            )
+        await _log(interaction, "dnd_sheet", f"attribute={attribute} skill={skill} splat={splat}", success=True)
 
     @dnd.command(name="setup", description="Edition-aware D&D setup helpers.")
     async def setup(interaction: Any, action: str = "show") -> None:  # type: ignore[misc]
@@ -160,6 +201,47 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         ]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
         await _log(interaction, "dnd_setup", f"edition={edition}", success=True)
+
+    @dnd.command(name="character", description="Edition-aware character helpers.")
+    async def character(interaction: Any, action: str = "show", name: str = "", splat: str = "") -> None:  # type: ignore[misc]
+        if await _enforce_setup(interaction):
+            return
+        if not interaction.guild:
+            if reply_ephemeral:
+                await reply_ephemeral(interaction, "Use in a server.")
+            return
+        guild_id = int(interaction.guild.id)
+        user_id = int(interaction.user.id)
+        edition = _edition_for_guild(interaction)
+        allowed = _allowed_splats_for_guild(interaction)
+        if action == "create":
+            if not name:
+                await interaction.response.send_message("Provide character name.", ephemeral=True)
+                return
+            splat_key = splat or (allowed[0] if allowed else "custom")
+            if allowed and splat_key not in allowed:
+                await interaction.response.send_message(
+                    f"`{splat_key}` is not allowed for this edition. Allowed: {', '.join(allowed)}",
+                    ephemeral=True,
+                )
+                return
+            upsert_member(DND_DB_PATH, guild_id, user_id, name=name)
+            await interaction.response.send_message(f"Created character `{name}` for `{splat_key}`.", ephemeral=True)
+        elif action == "show":
+            members = chronicle_service.list_members(DND_DB_PATH, guild_id)
+            member = next((m for m in members if m.get("user_id") == user_id), None)
+            if not member:
+                await interaction.response.send_message("No character found for this server.", ephemeral=True)
+                return
+            edition_label = _edition_label(edition)
+            lines = [
+                f"Member: {member.get('name')}",
+                f"Edition: {edition_label}",
+                f"Allowed splats: {', '.join(allowed)}",
+            ]
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        else:
+            await interaction.response.send_message("Use `create` or `show`.", ephemeral=True)
 
     @dnd.command(name="xp", description="XP tracking helpers.")
     async def xp(interaction: Any, action: str = "add", amount: float = 1.0, reason: str = "") -> None:  # type: ignore[misc]
