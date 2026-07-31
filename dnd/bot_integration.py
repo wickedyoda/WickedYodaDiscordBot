@@ -29,11 +29,19 @@ EDITION_CHOICES = [
 
 def _edition_defaults(edition: str) -> List[str]:
     edition = (edition or "").strip().lower()
-    return editions.EDITION_DEFAULTS.get(edition, editions.EDITION_DEFAULTS["custom"])
+    info = editions.get_edition(edition)
+    if info:
+        return list(info.default_splats)
+    custom = editions.get_edition("custom")
+    if custom:
+        return list(custom.default_splats)
+    return []
 
 
 def _edition_label(edition: str) -> str:
-    return editions.EDITION_LABELS.get(edition, edition or "Custom")
+    edition = (edition or "").strip().lower()
+    info = editions.get_edition(edition)
+    return info.label if info else edition or "Custom"
 
 
 def _get_db_path() -> str:
@@ -329,7 +337,7 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 )
                 DEBUG_LOGGER.debug("REJECT /dnd character create invalid splat=%s allowed=%s", splat_key, allowed)
                 return
-            upsert_member(DND_DB_PATH, guild_id, user_id, name=name)
+            upsert_member(DND_DB_PATH, guild_id, user_id, default_character=name)
             template = character_builder.sheet_template(splat_key)
             payload = {"splat": splat_key, "fields": template}
             character_service.save_character(DND_DB_PATH, guild_id, user_id, splat_key, name, payload)
