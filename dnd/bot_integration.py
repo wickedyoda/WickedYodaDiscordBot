@@ -11,8 +11,10 @@ from dnd import editions
 from dnd import proxy_group_service
 from dnd import proxy_service
 from dnd.chronicle_service import add_xp, create_reward_rule, evaluate_rewards, get_chronicle, list_xp_entries, update_chronicle, upsert_member, upsert_reward_tier
+from dnd.debug_logger import get_logger, log_command
 
 DND_DB_PATH = "/app/data/dnd.db"
+DEBUG_LOGGER = get_logger("wickedyoda.dnd")
 
 EDITION_CHOICES = [
     app_commands.Choice(name="20th Anniversary / World of Darkness", value="20th"),
@@ -127,18 +129,23 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         speciality: str | None = None,
         notes: str | None = None,
     ) -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd roll system=%s pool=%s difficulty=%s modifier=%s", system, pool, difficulty, modifier)
+        log_command(DEBUG_LOGGER, interaction, "roll", system=system, pool=pool, difficulty=difficulty, modifier=modifier, willpower=willpower, speciality=speciality, notes=notes)
         if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd roll setup not complete guild=%s user=%s", getattr(getattr(interaction, "guild", None), "id", "dm"), getattr(getattr(interaction, "user", None), "id", "unknown"))
             return
         edition = _edition_for_guild(interaction)
         edition_info = editions.get_edition(edition)
         allowed_systems = edition_info.roll_systems if edition_info else []
         if system not in allowed_systems:
             label = _edition_label(edition)
+            DEBUG_LOGGER.debug("REJECT /dnd roll invalid system=%s edition=%s allowed=%s", system, edition, allowed_systems)
             await interaction.response.send_message(
                 f"`/dnd roll system:{system}` is not available for **{label}**. Allowed: {', '.join(allowed_systems)}.",
                 ephemeral=True,
             )
             return
+        DEBUG_LOGGER.debug("ACCEPT /dnd roll edition=%s system=%s", edition, system)
         await _log(interaction, "dnd_roll", f"system={system} pool={pool} diff={difficulty}", success=True)
 
     @roll.autocomplete("system")
@@ -164,13 +171,17 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         difficulty: int = 6,
         notes: str | None = None,
     ) -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd sheet splat=%s attribute=%s modifier=%s difficulty=%s", splat, attribute, modifier, difficulty)
+        log_command(DEBUG_LOGGER, interaction, "sheet", attribute=attribute, attribute2=attribute2, skill=skill, discipline=discipline, splat=splat, modifier=modifier, difficulty=difficulty, notes=notes)
         if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd sheet setup not complete")
             return
         edition = _edition_for_guild(interaction)
         edition_info = editions.get_edition(edition)
         allowed = _allowed_splats_for_guild(interaction)
         if splat and splat not in allowed:
             label = _edition_label(edition)
+            DEBUG_LOGGER.debug("REJECT /dnd sheet splat=%s edition=%s allowed=%s", splat, edition, allowed)
             await interaction.response.send_message(
                 f"`splat:{splat}` is not allowed under **{label}**. Choose from: {', '.join(allowed)}.",
                 ephemeral=True,
@@ -179,6 +190,7 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         system = edition_info.roll_systems[0] if edition_info and edition_info.roll_systems else edition
         sheet_supported = bool(edition_info.sheet_roll_supported) if edition_info else False
         if sheet_supported:
+            DEBUG_LOGGER.debug("EXECUTE /dnd sheet system=%s hunger=%s", system, bool(discipline))
             try:
                 from dnd.roll_5th import build_sheet_pool, roll_sheet_pool as _roll_sheet_pool
                 pool = 3 + int(modifier or 0)
@@ -191,8 +203,10 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 ]
                 await interaction.response.send_message("\n".join(lines), ephemeral=True)
             except Exception as exc:  # pragma: no cover
+                DEBUG_LOGGER.debug("ERROR /dnd sheet engine=%s", exc, exc_info=True)
                 await interaction.response.send_message(f"Sheet roll engine error: {exc}", ephemeral=True)
         else:
+            DEBUG_LOGGER.debug("SKIP /dnd sheet sheet_roll_supported=False for %s", edition)
             await interaction.response.send_message(
                 f"Sheet rolls are not enabled for **{_edition_label(edition)}**.",
                 ephemeral=True,
@@ -210,13 +224,17 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
 
     @dnd.command(name="setup", description="Edition-aware D&D setup helpers.")
     async def setup(interaction: Any, action: str = "show") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd setup action=%s", action)
+        log_command(DEBUG_LOGGER, interaction, "setup", action=action)
         if not interaction.guild:
+            DEBUG_LOGGER.debug("BLOCKED /dnd setup dm_context")
             await interaction.response.send_message("Use in a server.", ephemeral=True)
             return
         allowed = _allowed_splats_for_guild(interaction)
         data = chronicle_service.get_chronicle(DND_DB_PATH, int(interaction.guild.id))
         edition = (data or {}).get("edition") or "custom"
         label = _edition_label(edition)
+        DEBUG_LOGGER.debug("EXECUTE /dnd setup edition=%s allowed=%s", edition, allowed)
         lines = [
             f"Edition: {label}",
             f"Setup complete: {bool((data or {}).get('edition_setup_completed'))}",
@@ -227,6 +245,8 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
 
     @dnd.command(name="info", description="Edition/splat reference info.")
     async def info(interaction: Any, topic: str = "edition", choice: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd info topic=%s choice=%s", topic, choice)
+        log_command(DEBUG_LOGGER, interaction, "info", topic=topic, choice=choice)
         if topic == "edition":
             edition = choice.strip().lower() if choice else _edition_for_guild(interaction)
             if not edition:
@@ -261,7 +281,10 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
 
     @dnd.command(name="character", description="Edition-aware character helpers.")
     async def character(interaction: Any, action: str = "show", name: str = "", splat: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd character action=%s name=%s splat=%s", action, name, splat)
+        log_command(DEBUG_LOGGER, interaction, "character", action=action, name=name, splat=splat)
         if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd character setup not complete")
             return
         if not interaction.guild:
             if reply_ephemeral:
@@ -274,6 +297,7 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         if action == "create":
             if not name:
                 await interaction.response.send_message("Provide character name.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd character create missing name")
                 return
             splat_key = splat or (allowed[0] if allowed else "custom")
             if allowed and splat_key not in allowed:
@@ -281,6 +305,7 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                     f"`{splat_key}` is not allowed for this edition. Allowed: {', '.join(allowed)}",
                     ephemeral=True,
                 )
+                DEBUG_LOGGER.debug("REJECT /dnd character create invalid splat=%s allowed=%s", splat_key, allowed)
                 return
             upsert_member(DND_DB_PATH, guild_id, user_id, name=name)
             template = character_builder.sheet_template(splat_key)
@@ -289,6 +314,7 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 "Template fields: " + ", ".join(template.keys()),
             ]
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd character create name=%s splat=%s template_fields=%d", name, splat_key, len(template))
         elif action == "show":
             members = chronicle_service.list_members(DND_DB_PATH, guild_id)
             member = next((m for m in members if m.get("user_id") == user_id), None)
@@ -307,7 +333,10 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
 
     @dnd.command(name="xp", description="XP tracking helpers.")
     async def xp(interaction: Any, action: str = "add", amount: float = 1.0, reason: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd xp action=%s amount=%s reason=%s", action, amount, reason)
+        log_command(DEBUG_LOGGER, interaction, "xp", action=action, amount=amount, reason=reason)
         if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd xp setup not complete")
             return
         if not interaction.guild:
             if reply_ephemeral:
@@ -322,29 +351,38 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             entries = chronicle_service.list_xp_entries(DND_DB_PATH, guild_id, user_id)
             if not entries:
                 await interaction.response.send_message("No XP history.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd xp history empty guild=%s user=%s", guild_id, user_id)
                 return
             lines = "\n".join(f"- {e['amount']}: {e['reason']}" for e in entries[-10:])
             await interaction.response.send_message(lines, ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd xp history guild=%s user=%s entries=%d", guild_id, user_id, len(entries))
         else:
+            DEBUG_LOGGER.debug("REJECT /dnd xp bad action=%s", action)
             await interaction.response.send_message("Use `add` or `history`.", ephemeral=True)
 
     @dnd.command(name="reward", description="Auto reward helpers.")
     async def reward(interaction: Any, action: str = "status", rule_name: str = "", threshold: int = 10, reward: float = 1.0) -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd reward action=%s rule_name=%s threshold=%s reward=%s", action, rule_name, threshold, reward)
+        log_command(DEBUG_LOGGER, interaction, "reward", action=action, rule_name=rule_name, threshold=threshold, reward=reward)
         if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd reward setup not complete")
             return
         if not interaction.guild:
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Use in a server.")
+            DEBUG_LOGGER.debug("REJECT /dnd reward dm_context")
             return
         guild_id = int(interaction.guild.id)
         user_id = int(interaction.user.id)
         if action == "create":
             if not rule_name:
                 await interaction.response.send_message("Provide rule_name.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd reward create missing rule_name")
                 return
             rule = create_reward_rule(DND_DB_PATH, guild_id, rule_name)
             upsert_reward_tier(DND_DB_PATH, rule["id"], idx=0, threshold=int(threshold), reward=float(reward))
             await interaction.response.send_message(f"Created reward rule `{rule_name}`.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd reward create rule_name=%s threshold=%s reward=%s", rule_name, threshold, reward)
         elif action == "status":
             stats = evaluate_rewards(DND_DB_PATH, guild_id, user_id)
             if not stats:
@@ -356,22 +394,29 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                     lines.append(f"- {r.get('name')}: {r.get('current_count')}/{r.get('threshold')} ({pct}%)")
                 content = "\n".join(lines)
             await interaction.response.send_message(content or "No data.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd reward status guild=%s user=%s rules=%d", guild_id, user_id, len(stats))
         else:
+            DEBUG_LOGGER.debug("REJECT /dnd reward bad action=%s", action)
             await interaction.response.send_message("Use `create` or `status`.", ephemeral=True)
 
     @dnd.command(name="server", description="D&D server/chronicle settings.")
     async def server(interaction: Any, action: str = "show", name: str = "Chronicle", edition: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd server action=%s name=%s edition=%s", action, name, edition)
+        log_command(DEBUG_LOGGER, interaction, "server", action=action, name=name, edition=edition)
         if not interaction.guild:
+            DEBUG_LOGGER.debug("BLOCKED /dnd server dm_context")
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Use in a server.")
             return
         guild_id = int(interaction.guild.id)
         if action == "setup":
             if not edition:
+                DEBUG_LOGGER.debug("REJECT /dnd server missing edition")
                 await interaction.response.send_message("Choose an edition: `/dnd server setup edition:20th`", ephemeral=True)
                 return
             label = _edition_label(edition)
             defaults = _edition_defaults(edition)
+            DEBUG_LOGGER.debug("EXECUTE /dnd server setup edition=%s defaults=%s", edition, defaults)
             chronicle_service.update_chronicle(
                 DND_DB_PATH,
                 guild_id,
@@ -424,11 +469,15 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
 
     @dnd.command(name="group", description="Proxy group CRUD.")
     async def group(interaction: Any, action: str = "list", name: str = "", description: str = "", proxy: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd group action=%s name=%s description=%s proxy=%s", action, name, description, proxy)
+        log_command(DEBUG_LOGGER, interaction, "group", action=action, name=name, description=description, proxy=proxy)
         if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd group setup not complete")
             return
         if not interaction.guild:
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Use in a server.")
+            DEBUG_LOGGER.debug("REJECT /dnd group dm_context")
             return
         guild_id = int(interaction.guild.id)
         user_id = int(interaction.user.id)
@@ -436,28 +485,36 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         if action == "create":
             if not name:
                 await interaction.response.send_message("Provide group name.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd group create missing name")
                 return
             proxy_group_service.create_proxy_group(DND_DB_PATH, guild_id, user_id, name, description)
             await interaction.response.send_message(f"Created proxy group `{name}`.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd group create name=%s", name)
         elif action == "add":
             if not name or not proxy:
                 await interaction.response.send_message("Provide group name and proxy name.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd group add missing fields")
                 return
             result = proxy_group_service.add_proxy_to_group(DND_DB_PATH, guild_id, user_id, name, proxy)
             if not result:
                 await interaction.response.send_message("Proxy not found.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd group add proxy not found group=%s proxy=%s", name, proxy)
                 return
             await interaction.response.send_message(f"Added proxy `{proxy}` to group `{name}`.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd group add group=%s proxy=%s", name, proxy)
         elif action == "remove":
             if not name or not proxy:
                 await interaction.response.send_message("Provide group name and proxy name.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd group remove missing fields")
                 return
             removed = proxy_group_service.remove_proxy_from_group(DND_DB_PATH, guild_id, user_id, name, proxy)
             await interaction.response.send_message("Removed." if removed else "Proxy not in group.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd group remove group=%s proxy=%s removed=%s", name, proxy, removed)
         elif action == "list":
             groups = proxy_group_service.list_proxy_groups(DND_DB_PATH, guild_id, user_id)
             if not groups:
                 await interaction.response.send_message("No proxy groups yet.", ephemeral=True)
+                DEBUG_LOGGER.debug("ACCEPT /dnd group list empty")
                 return
             lines = []
             for g in groups:
@@ -465,16 +522,22 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 members_hint = ", ".join(m.get("name", "") for m in members) if members else "empty"
                 lines.append(f"- {g['name']}: {members_hint}")
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd group list groups=%d", len(groups))
         else:
+            DEBUG_LOGGER.debug("REJECT /dnd group bad action=%s", action)
             await interaction.response.send_message("Use `create`, `add`, `remove`, or `list`.", ephemeral=True)
 
     @dnd.command(name="reproxy", description="Reproxy/message tracking helpers.")
     async def reproxy(interaction: Any, action: str = "list", group: str = "", proxy: str = "", target_channel: str = "", source_message: str = "", content: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd reproxy action=%s group=%s proxy=%s target_channel=%s source_message=%s", action, group, proxy, target_channel, source_message)
+        log_command(DEBUG_LOGGER, interaction, "reproxy", action=action, group=group, proxy=proxy, target_channel=target_channel, source_message=source_message, content=content)
         if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd reproxy setup not complete")
             return
         if not interaction.guild:
             if reply_ephemeral:
                 await reply_ephemeral(interaction, "Use in a server.")
+            DEBUG_LOGGER.debug("REJECT /dnd reproxy dm_context")
             return
         guild_id = int(interaction.guild.id)
         user_id = int(interaction.user.id)
@@ -482,15 +545,18 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         if action == "create":
             if not group or not proxy or not target_channel:
                 await interaction.response.send_message("Provide group, proxy, and target_channel.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd reproxy create missing fields")
                 return
             try:
                 channel_id = int(target_channel)
             except ValueError:
                 await interaction.response.send_message("target_channel must be a channel ID.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd reproxy invalid target_channel=%s", target_channel)
                 return
             proxy_row = proxy_service.get_proxy(DND_DB_PATH, guild_id, user_id, proxy)
             if not proxy_row:
                 await interaction.response.send_message("Proxy not found.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd reproxy proxy not found proxy=%s", proxy)
                 return
             proxy_group_service.record_reproxy(
                 DND_DB_PATH,
@@ -503,15 +569,19 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 content=content,
             )
             await interaction.response.send_message(f"Recorded reproxy to <#{channel_id}> for `{proxy}` from `{group}`.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd reproxy create group=%s proxy=%s channel=%s", group, proxy, channel_id)
         elif action == "list":
             jobs = proxy_group_service.list_reproxy_jobs(DND_DB_PATH, guild_id, user_id)
             if not jobs:
                 await interaction.response.send_message("No reproxy jobs yet.", ephemeral=True)
+                DEBUG_LOGGER.debug("ACCEPT /dnd reproxy list empty")
                 return
             lines = "\n".join(
                 f"- {j['created_at']}: {j['group_name']} -> <#{j['target_channel_id']}> proxy={j['proxy_id']} src={j['source_message_id']}"
                 for j in jobs[:20]
             )
             await interaction.response.send_message(lines, ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd reproxy list jobs=%d", len(jobs))
         else:
+            DEBUG_LOGGER.debug("REJECT /dnd reproxy bad action=%s", action)
             await interaction.response.send_message("Use `create` or `list`.", ephemeral=True)
