@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Dict, List, Optional
 
 from dnd.wiki_reference import WIKI_REFERENCE_URL, WIKI_SUMMARY
@@ -202,3 +203,9 @@ def _edition_for_splat(splat: str) -> Optional[EditionInfo]:
         if splat in edition.default_splats:
             return edition
     return None
+
+
+@lru_cache(maxsize=256)
+def _cached_edition_for_splat(splat: str) -> Optional[str]:
+    edition = _edition_for_splat(splat)
+    return edition.key if edition else None

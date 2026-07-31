@@ -534,8 +534,8 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 f"Chronicle: {data['name']}",
                 f"Edition: {_edition_label(edition)} ({setup})",
                 f"Allowed splats/species: {', '.join(data.get('allowed_splats', [])) or 'none'}",
-                f"XP tracking: {data['xp_tracking_enabled']}",
-                f"Auto rewards: {data['auto_reward_enabled']}",
+                f"XP tracking: {'on' if data['xp_tracking_enabled'] else 'off'}",
+                f"Auto rewards: {'on' if data['auto_reward_enabled'] else 'off'}",
                 f"Monitored channels: {monitored}",
                 f"Excluded channels: {excluded}",
             ]

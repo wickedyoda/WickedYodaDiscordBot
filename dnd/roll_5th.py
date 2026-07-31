@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass, field
 
 
@@ -17,19 +18,20 @@ class SheetRollResult:
 
 
 def roll_v5_die() -> int:
-    import secrets
     return int(secrets.randbelow(10) + 1)
 
 
 def build_sheet_pool(base: int, hunger: bool = False, modifier: int = 0, desperation: bool = False, rage: bool = False) -> int:
-    pool = max(0, base + modifier)
-    if hunger and pool >= 0:
+    pool = base + modifier
+    if hunger:
         pool += 1
     if desperation:
         pool += 1
     if rage:
         pool += 1
-    return max(0, pool)
+    if pool < 0:
+        return 0
+    return pool
 
 
 def roll_sheet_pool(pool: int, difficulty: int = 6, hunger: bool = False, modifier: int = 0, desperation: bool = False, rage: bool = False) -> SheetRollResult:
