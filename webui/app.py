@@ -1340,6 +1340,8 @@ def _ensure_users_table(db_path: str) -> None:
             conn.execute("ALTER TABLE web_users ADD COLUMN discord_user_id INTEGER")
         if "discord_username" not in columns:
             conn.execute("ALTER TABLE web_users ADD COLUMN discord_username TEXT")
+        if "is_dnd_role" not in columns:
+            conn.execute("ALTER TABLE web_users ADD COLUMN is_dnd_role INTEGER NOT NULL DEFAULT 0")
         current_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(web_users)").fetchall()}
         if "discord_user_id" in current_columns and "discord_username" in current_columns:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_web_users_discord_user_id ON web_users(discord_user_id)")
@@ -1517,6 +1519,7 @@ def _upsert_user(
     password_hash: str,
     is_admin: bool,
     is_guild_admin: bool = False,
+    is_dnd_role: bool = False,
     display_name: str | None = None,
     first_name: str = "",
     last_name: str = "",
@@ -1533,9 +1536,9 @@ def _upsert_user(
         conn.execute(
             """
             INSERT INTO web_users (
-                email, password_hash, display_name, first_name, last_name, is_admin, is_guild_admin, created_at, password_changed_at
+                email, password_hash, display_name, first_name, last_name, is_admin, is_guild_admin, is_dnd_role, created_at, password_changed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(email) DO UPDATE SET
                 password_hash = excluded.password_hash,
                 display_name = excluded.display_name,
@@ -1546,7 +1549,8 @@ def _upsert_user(
                     ELSE excluded.password_changed_at
                 END,
                 is_admin = excluded.is_admin,
-                is_guild_admin = excluded.is_guild_admin
+                is_guild_admin = excluded.is_guild_admin,
+                is_dnd_role = excluded.is_dnd_role
             """,
             (
                 email.lower(),
@@ -1556,6 +1560,7 @@ def _upsert_user(
                 normalized_last_name,
                 int(is_admin),
                 int(is_guild_admin),
+                int(is_dnd_role),
                 created_at,
                 resolved_password_changed_at,
                 password_changed_at,
@@ -1570,7 +1575,7 @@ def _get_user(db_path: str, email: str) -> dict | None:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             """
-            SELECT email, password_hash, display_name, first_name, last_name, is_admin, is_guild_admin, created_at, password_changed_at, discord_user_id, discord_username
+            SELECT email, password_hash, display_name, first_name, last_name, is_admin, is_guild_admin, is_dnd_role, created_at, password_changed_at, discord_user_id, discord_username
             FROM web_users
             WHERE email = ?
             """,
@@ -1585,7 +1590,7 @@ def _list_users(db_path: str) -> list[dict]:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT email, display_name, first_name, last_name, is_admin, is_guild_admin, created_at, discord_user_id, discord_username
+            SELECT email, display_name, first_name, last_name, is_admin, is_guild_admin, is_dnd_role, created_at, discord_user_id, discord_username
             FROM web_users
             ORDER BY email ASC
             """
@@ -1611,6 +1616,7 @@ def _update_user_record(
     last_name: str = "",
     is_admin: bool,
     is_guild_admin: bool,
+    is_dnd_role: bool = False,
     password_hash: str | None = None,
     discord_user_id: int | None = None,
 ) -> tuple[bool, str]:
@@ -1637,7 +1643,7 @@ def _update_user_record(
         conn.execute(
             """
             UPDATE web_users
-            SET email = ?, password_hash = ?, display_name = ?, first_name = ?, last_name = ?, is_admin = ?, is_guild_admin = ?, password_changed_at = ?, discord_user_id = ?, discord_username = web_users.discord_username
+            SET email = ?, password_hash = ?, display_name = ?, first_name = ?, last_name = ?, is_admin = ?, is_guild_admin = ?, is_dnd_role = ?, password_changed_at = ?, discord_user_id = ?, discord_username = web_users.discord_username
             WHERE email = ?
             """,
             (
@@ -1648,6 +1654,7 @@ def _update_user_record(
                 last_name.strip(),
                 int(is_admin),
                 int(is_guild_admin),
+                int(is_dnd_role),
                 password_changed_at,
                 int(discord_user_id) if discord_user_id is not None else None,
                 current_email.strip().lower(),
@@ -2605,6 +2612,7 @@ def create_app(
         session.pop("user", None)
         session.pop("is_admin", None)
         session.pop("is_guild_admin", None)
+        session.pop("is_dnd_role", None)
         session.pop("auth_mode", None)
         session.pop("auth_issued_at", None)
         session.pop("auth_last_seen", None)
@@ -2616,6 +2624,7 @@ def create_app(
         session["user"] = str(user.get("email", "")).strip().lower()
         session["is_admin"] = bool(user.get("is_admin"))
         session["is_guild_admin"] = bool(user.get("is_guild_admin"))
+        session["is_dnd_role"] = bool(user.get("is_dnd_role"))
         session["auth_mode"] = AUTH_MODE_REMEMBER if remember_login else AUTH_MODE_STANDARD
         session["auth_issued_at"] = now_dt.isoformat()
         session["auth_last_seen"] = now_dt.isoformat()
@@ -2747,6 +2756,22 @@ def create_app(
 
     def _current_user_can_manage_guild() -> bool:
         return _current_user_is_admin() or _current_user_is_guild_admin()
+
+    def _current_user_is_dnd() -> bool:
+        return bool(session.get("is_dnd_role"))
+
+    def dnd_required(handler):
+        @wraps(handler)
+        def wrapped(*args, **kwargs):
+            user = _current_user()
+            if user is None:
+                return redirect(url_for("login"))
+            if not bool(user.get("is_dnd_role")) and not bool(user.get("is_admin")):
+                flash("DND role access required.", "warning")
+                return redirect(url_for("dashboard"))
+            return handler(*args, **kwargs)
+
+        return wrapped
 
     def _reject_read_only_write(redirect_endpoint: str):
         flash("Read-only accounts can view this page but cannot make changes.", "warning")

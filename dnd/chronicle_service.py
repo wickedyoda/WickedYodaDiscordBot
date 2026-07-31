@@ -59,6 +59,8 @@ def create_chronicle(db_path: str, guild_id: int, owner_id: int, name: str = "Ch
 
 
 def update_chronicle(db_path: str, guild_id: int, **fields) -> None:
+    if not fields:
+        return
     _ensure_guild(db_path, guild_id)
     allowed = {
         "name",
@@ -73,6 +75,9 @@ def update_chronicle(db_path: str, guild_id: int, **fields) -> None:
         "xp_reward_feed_channel_id",
         "owner_id",
     }
+    unknown = [k for k in fields if k not in allowed]
+    if unknown:
+        raise ValueError(f"Unknown chronicle fields: {', '.join(unknown)}")
     sets = ["updated_at = ?"]
     values = [_utc_now()]
     for k, v in fields.items():
@@ -84,7 +89,7 @@ def update_chronicle(db_path: str, guild_id: int, **fields) -> None:
         values.append(v)
     values.append(int(guild_id))
     with _get_conn(db_path) as conn:
-        conn.execute(f"""UPDATE dnd_chronicles SET {", ".join(sets)} WHERE guild_id = ?""", values)  # nosec B608
+        conn.execute(f"UPDATE dnd_chronicles SET {', '.join(sets)} WHERE guild_id = ?", values)
         conn.commit()
 
 
@@ -101,6 +106,34 @@ def list_members(db_path: str, guild_id: int) -> list[dict]:
                 "nickname": r["nickname"],
                 "avatar_url": r["avatar_url"],
                 "default_character": r["default_character"],
+            }
+            for r in rows
+        ]
+
+
+def list_member_rankings(db_path: str, guild_id: int, limit: int = 50) -> list[dict]:
+    guild_id = int(guild_id)
+    with _get_conn(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT m.user_id, m.nickname, m.default_character, m.storyteller, m.admin,
+                   COALESCE(p.pool, 0) AS xp
+            FROM dnd_chronicle_members m
+            LEFT JOIN dnd_xp_pools p ON p.guild_id = m.guild_id AND p.user_id = m.user_id
+            WHERE m.guild_id = ?
+            ORDER BY xp DESC, m.user_id ASC
+            LIMIT ?
+            """,
+            (guild_id, int(limit)),
+        ).fetchall()
+        return [
+            {
+                "user_id": int(r["user_id"]),
+                "nickname": str(r["nickname"] or ""),
+                "default_character": str(r["default_character"] or ""),
+                "storyteller": bool(r["storyteller"]),
+                "admin": bool(r["admin"]),
+                "xp": float(r["xp"] or 0),
             }
             for r in rows
         ]
