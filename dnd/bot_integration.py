@@ -85,13 +85,56 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         allowed = list(data.get("allowed_splats", []) or [])
         return allowed
 
+    def _edition_for_guild(interaction: Any) -> str:
+        if not getattr(interaction, "guild", None):
+            return "custom"
+        data = chronicle_service.get_chronicle(DND_DB_PATH, int(interaction.guild.id))
+        if not data:
+            return "custom"
+        edition = (data.get("edition") or "custom").strip().lower()
+        return edition
+
+    def _ensure_splat(interaction: Any, splat: str) -> bool:
+        allowed = _allowed_splats_for_guild(interaction)
+        if not allowed:
+            return False
+        return splat in allowed
+
+    def _edition_choices(interaction: Any) -> List[app_commands.Choice]:
+        edition = _edition_for_guild(interaction)
+        allowed = _allowed_splats_for_guild(interaction)
+        out: List[app_commands.Choice] = []
+        for name in allowed[:25]:
+            label = editions.splat_label(name)
+            out.append(app_commands.Choice(name=label or name, value=name))
+        return out
+
     dnd = bot.tree.get_command("dnd")
     if dnd is None:
         raise RuntimeError("Missing `/dnd` application group.")
 
     @dnd.command(name="roll", description="20th / 5th Edition dice roll.")
-    async def roll(interaction: Any, system: str = "20th", pool: int = 1, difficulty: int = 6, modifier: int = 0, willpower: bool = False, speciality: str | None = None, notes: str | None = None) -> None:  # type: ignore[misc]
+    async def roll(
+        interaction: Any,
+        system: str = "20th",
+        pool: int = 1,
+        difficulty: int = 6,
+        modifier: int = 0,
+        willpower: bool = False,
+        speciality: str | None = None,
+        notes: str | None = None,
+    ) -> None:  # type: ignore[misc]
         if await _enforce_setup(interaction):
+            return
+        edition = _edition_for_guild(interaction)
+        edition_info = editions.get_edition(edition)
+        allowed_systems = edition_info.roll_systems if edition_info else []
+        if system not in allowed_systems:
+            label = _edition_label(edition)
+            await interaction.response.send_message(
+                f"`/dnd roll system:{system}` is not available for **{label}**. Allowed: {', '.join(allowed_systems)}.",
+                ephemeral=True,
+            )
             return
         await _log(interaction, "dnd_roll", f"system={system} pool={pool} diff={difficulty}", success=True)
 
