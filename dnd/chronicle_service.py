@@ -37,6 +37,8 @@ def get_chronicle(db_path: str, guild_id: int) -> dict | None:
             "excluded_channel_ids": json.loads(row["excluded_channel_ids"]),
             "discord_roles": json.loads(row["discord_roles"]),
             "allowed_splats": json.loads(row["allowed_splats"]),
+            "edition": row["edition"],
+            "edition_setup_completed": bool(row["edition_setup_completed"]),
             "xp_feed_channel_id": row["xp_feed_channel_id"],
             "xp_reward_feed_channel_id": row["xp_reward_feed_channel_id"],
             "owner_id": row["owner_id"],
