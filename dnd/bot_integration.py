@@ -8,6 +8,8 @@ from discord import app_commands
 from dnd import chronicle_service
 from dnd import character_builder
 from dnd import editions
+from dnd import proxy_group_service
+from dnd import proxy_service
 from dnd.chronicle_service import add_xp, create_reward_rule, evaluate_rewards, get_chronicle, list_xp_entries, update_chronicle, upsert_member, upsert_reward_tier
 
 DND_DB_PATH = "/app/data/dnd.db"
@@ -419,3 +421,97 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         else:
             update_chronicle(DND_DB_PATH, guild_id, name=name, owner_id=int(interaction.user.id))
             await interaction.response.send_message("Updated chronicle settings.", ephemeral=True)
+
+    @dnd.command(name="group", description="Proxy group CRUD.")
+    async def group(interaction: Any, action: str = "list", name: str = "", description: str = "", proxy: str = "") -> None:  # type: ignore[misc]
+        if await _enforce_setup(interaction):
+            return
+        if not interaction.guild:
+            if reply_ephemeral:
+                await reply_ephemeral(interaction, "Use in a server.")
+            return
+        guild_id = int(interaction.guild.id)
+        user_id = int(interaction.user.id)
+        from dnd import proxy_group_service
+        if action == "create":
+            if not name:
+                await interaction.response.send_message("Provide group name.", ephemeral=True)
+                return
+            proxy_group_service.create_proxy_group(DND_DB_PATH, guild_id, user_id, name, description)
+            await interaction.response.send_message(f"Created proxy group `{name}`.", ephemeral=True)
+        elif action == "add":
+            if not name or not proxy:
+                await interaction.response.send_message("Provide group name and proxy name.", ephemeral=True)
+                return
+            result = proxy_group_service.add_proxy_to_group(DND_DB_PATH, guild_id, user_id, name, proxy)
+            if not result:
+                await interaction.response.send_message("Proxy not found.", ephemeral=True)
+                return
+            await interaction.response.send_message(f"Added proxy `{proxy}` to group `{name}`.", ephemeral=True)
+        elif action == "remove":
+            if not name or not proxy:
+                await interaction.response.send_message("Provide group name and proxy name.", ephemeral=True)
+                return
+            removed = proxy_group_service.remove_proxy_from_group(DND_DB_PATH, guild_id, user_id, name, proxy)
+            await interaction.response.send_message("Removed." if removed else "Proxy not in group.", ephemeral=True)
+        elif action == "list":
+            groups = proxy_group_service.list_proxy_groups(DND_DB_PATH, guild_id, user_id)
+            if not groups:
+                await interaction.response.send_message("No proxy groups yet.", ephemeral=True)
+                return
+            lines = []
+            for g in groups:
+                members = proxy_group_service.list_group_proxies(DND_DB_PATH, guild_id, user_id, g["name"])
+                members_hint = ", ".join(m.get("name", "") for m in members) if members else "empty"
+                lines.append(f"- {g['name']}: {members_hint}")
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        else:
+            await interaction.response.send_message("Use `create`, `add`, `remove`, or `list`.", ephemeral=True)
+
+    @dnd.command(name="reproxy", description="Reproxy/message tracking helpers.")
+    async def reproxy(interaction: Any, action: str = "list", group: str = "", proxy: str = "", target_channel: str = "", source_message: str = "", content: str = "") -> None:  # type: ignore[misc]
+        if await _enforce_setup(interaction):
+            return
+        if not interaction.guild:
+            if reply_ephemeral:
+                await reply_ephemeral(interaction, "Use in a server.")
+            return
+        guild_id = int(interaction.guild.id)
+        user_id = int(interaction.user.id)
+        from dnd import proxy_group_service
+        if action == "create":
+            if not group or not proxy or not target_channel:
+                await interaction.response.send_message("Provide group, proxy, and target_channel.", ephemeral=True)
+                return
+            try:
+                channel_id = int(target_channel)
+            except ValueError:
+                await interaction.response.send_message("target_channel must be a channel ID.", ephemeral=True)
+                return
+            proxy_row = proxy_service.get_proxy(DND_DB_PATH, guild_id, user_id, proxy)
+            if not proxy_row:
+                await interaction.response.send_message("Proxy not found.", ephemeral=True)
+                return
+            proxy_group_service.record_reproxy(
+                DND_DB_PATH,
+                guild_id=guild_id,
+                target_channel_id=channel_id,
+                owner_id=user_id,
+                group_name=group,
+                proxy_id=int(proxy_row["id"]),
+                source_message_id=source_message,
+                content=content,
+            )
+            await interaction.response.send_message(f"Recorded reproxy to <#{channel_id}> for `{proxy}` from `{group}`.", ephemeral=True)
+        elif action == "list":
+            jobs = proxy_group_service.list_reproxy_jobs(DND_DB_PATH, guild_id, user_id)
+            if not jobs:
+                await interaction.response.send_message("No reproxy jobs yet.", ephemeral=True)
+                return
+            lines = "\n".join(
+                f"- {j['created_at']}: {j['group_name']} -> <#{j['target_channel_id']}> proxy={j['proxy_id']} src={j['source_message_id']}"
+                for j in jobs[:20]
+            )
+            await interaction.response.send_message(lines, ephemeral=True)
+        else:
+            await interaction.response.send_message("Use `create` or `list`.", ephemeral=True)

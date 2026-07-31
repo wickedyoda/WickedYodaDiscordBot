@@ -58,6 +58,38 @@ CREATE TABLE IF NOT EXISTS dnd_proxied_messages (
     created_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00'
 );
 
+CREATE TABLE IF NOT EXISTS dnd_proxy_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    owner_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00',
+    updated_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00',
+    UNIQUE(guild_id, owner_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS dnd_proxy_group_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_name TEXT NOT NULL,
+    guild_id INTEGER NOT NULL,
+    owner_id INTEGER NOT NULL,
+    proxy_id INTEGER NOT NULL,
+    UNIQUE(group_name, guild_id, owner_id, proxy_id)
+);
+
+CREATE TABLE IF NOT EXISTS dnd_reproxy_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    target_channel_id INTEGER NOT NULL,
+    owner_id INTEGER NOT NULL,
+    group_name TEXT NOT NULL,
+    proxy_id INTEGER NOT NULL,
+    source_message_id TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00'
+);
+
 CREATE TABLE IF NOT EXISTS dnd_xp_pools (
     guild_id INTEGER NOT NULL,
     user_id INTEGER NOT NULL,
