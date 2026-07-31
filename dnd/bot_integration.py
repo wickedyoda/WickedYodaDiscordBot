@@ -1,435 +1,579 @@
 from __future__ import annotations
 
-import datetime
 import json
-import logging
+import sqlite3
 from typing import Any
 
-import discord
 from discord import app_commands
 
-from dnd import chronicle_service, general_roll
-from dnd import initiative as initiative_domain
-from dnd import roll_20th as d20
-from dnd.characters import delete_character as delete_char_repo
-from dnd.characters import find_character, list_characters, save_character
+from dnd import character_builder, chronicle_service, editions, proxy_group_service, proxy_service
+from dnd import characters as character_service
+from dnd.character_derived import _to_int, build_derived, render_ability_block, render_derived
+from dnd.chronicle_schema import _get_conn
 from dnd.chronicle_service import (
     add_xp,
     create_reward_rule,
     evaluate_rewards,
-    list_xp_entries,
+    update_chronicle,
+    upsert_member,
     upsert_reward_tier,
 )
-from dnd.initiative_repo import load_tracker, save_tracker
-from dnd.proxy_service import (
-    add_proxy_identity,
-    delete_proxy,
-    get_proxy,
-    list_proxies,
-)
-
-bound: dict[str, Any] | None = None
-log = logging.getLogger(__name__)
+from dnd.debug_logger import get_logger, log_command
+from dnd.editions import _edition_for_splat
+from dnd.roll_router import RollError, route_roll
 
 DND_DB_PATH = "/app/data/dnd.db"
+DEBUG_LOGGER = get_logger("wickedyoda.dnd")
+
+EDITION_CHOICES = [
+    app_commands.Choice(name="20th Anniversary / World of Darkness", value="20th"),
+    app_commands.Choice(name="5th Edition / 2024 Edition", value="5e"),
+    app_commands.Choice(name="Custom", value="custom"),
+]
 
 
-def _utc_now() -> str:
-    return datetime.datetime.now(datetime.UTC).isoformat()
+def _edition_defaults(edition: str) -> list[str]:
+    edition = (edition or "").strip().lower()
+    info = editions.get_edition(edition)
+    if info:
+        return list(info.default_splats)
+    custom = editions.get_edition("custom")
+    if custom:
+        return list(custom.default_splats)
+    return []
 
+
+def _edition_label(edition: str) -> str:
+    edition = (edition or "").strip().lower()
+    info = editions.get_edition(edition)
+    return info.label if info else edition or "Custom"
+
+
+def _get_db_path() -> str:
+    return DND_DB_PATH
+
+
+def _member_default_character(db_path: str, guild_id: int, user_id: int) -> str | None:
+    row = (
+        _get_conn(db_path)
+        .execute(
+            "SELECT default_character FROM dnd_chronicle_members WHERE guild_id=? AND user_id=?",
+            (int(guild_id), int(user_id)),
+        )
+        .fetchone()
+    )
+    if not row:
+        return None
+    value = row["default_character"] if isinstance(row, sqlite3.Row) else row[0]
+    if value:
+        return str(value)
+    return None
+
+
+def _resolve_default_character_fields(db_path: str, guild_id: int, user_id: int) -> dict[str, Any]:
+    member_name = _member_default_character(db_path, guild_id, user_id)
+    if not member_name:
+        return {}
+    row = _get_conn(db_path).execute(
+        "SELECT json FROM dnd_characters WHERE guild_id=? AND owner_id=? AND name=?",
+        (int(guild_id), int(user_id), member_name),
+    ).fetchone()
+    if not row:
+        return {}
+    payload = json.loads(row["json"])
+    return payload.get("fields") or {}
+
+
+def _resolve_attribute_for_sheet(edition: str, attribute: str | None, fields: dict[str, Any]) -> int:
+    if not attribute or not fields:
+        return 0
+    attr = attribute.strip().lower()
+    edition_key = (edition or "").strip().lower()
+    stat_map_5e = {
+        "str": "strength", "strength": "strength",
+        "dex": "dexterity", "dexterity": "dexterity",
+        "con": "constitution", "constitution": "constitution",
+        "int": "intelligence", "intelligence": "intelligence",
+        "wis": "wisdom", "wisdom": "wisdom",
+        "cha": "charisma", "charisma": "charisma",
+    }
+    stat_map_20th = {
+        "str": "strength", "strength": "strength",
+        "dex": "dexterity", "dexterity": "dexterity",
+        "sta": "stamina", "stamina": "stamina",
+        "cha": "charisma", "charisma": "charisma",
+        "man": "manipulation", "manipulation": "manipulation",
+        "app": "appearance", "appearance": "appearance",
+        "per": "perception", "perception": "perception",
+        "int": "intelligence", "intelligence": "intelligence",
+        "wit": "wits", "wits": "wits",
+    }
+    stat_map = stat_map_20th if edition_key.startswith("20th") else stat_map_5e
+    stat_key = stat_map.get(attr, attr)
+    if stat_key not in stat_map.values():
+        return 0
+    return _to_int(fields.get(stat_key))
+
+
+def _resolve_skill_for_sheet(skill: str | None, fields: dict[str, Any]) -> int:
+    if not skill or not fields:
+        return 0
+    key = skill.strip().lower()
+    skill_text = str(fields.get("skills") or "")
+    if not skill_text:
+        return 0
+    candidates = [part.strip().lower() for part in skill_text.replace("\n", ",").split(",") if part.strip()]
+    return 2 if key in candidates else 0
+
+
+def _active_character_initiative_stat(edition: str, fields: dict[str, Any]) -> int:
+    edition_key = (edition or "").strip().lower()
+    if edition_key.startswith("20th"):
+        return _resolve_attribute_for_sheet(edition, "wits", fields)
+    return _resolve_attribute_for_sheet(edition, "dexterity", fields)
 
 def ensure_dnd_schema() -> None:
     from dnd.characters import ensure_schema as ensure_character_schema
     from dnd.chronicle_schema import ensure_schema as ensure_chronicle_schema
     from dnd.initiative_repo import ensure_schema as ensure_init_schema
-
     ensure_chronicle_schema(DND_DB_PATH)
     ensure_character_schema(DND_DB_PATH)
     ensure_init_schema(DND_DB_PATH)
 
 
-def _get_db_rows(db_path: str, sql: str, params: tuple) -> list[dict]:
-    import sqlite3
-
-    conn = sqlite3.connect(db_path, timeout=10)
-    conn.row_factory = sqlite3.Row
-    with conn:
-        rows = conn.execute(sql, params).fetchall()
-    return [dict(row) for row in rows]
-
-
-def _parse_json_list(raw: str) -> list[str]:
-    try:
-        data = json.loads(raw or "[]")
-    except Exception:
-        data = []
-    if isinstance(data, list):
-        return [str(item) for item in data]
-    return []
-
-
-def _allowed_splats(db_path: str, guild_id: int) -> list[str]:
-    rows = _get_db_rows(db_path, "SELECT allowed_splats FROM dnd_chronicles WHERE guild_id=?", (int(guild_id),))
-    fallback = '["vampire20th"]'
-    return _parse_json_list(rows[0]["allowed_splats"] if rows else fallback)
-
-
-def _sheet_fields_for_splat(splat: str, name: str, data: dict) -> list[str]:
-    if splat in {"vampire20th", "vampire"}:
-        return [
-            f"**{name}** - Vampire 20th",
-            f"- Generation: {data.get('generation', '?')}",
-            f"- Clan: {data.get('clan', '?')}",
-            f"- Blood Pool: {data.get('blood', '?')}",
-            f"- Embrace: {data.get('embrace', '?')}",
-            f"- Sire: {data.get('sire', '?')}",
-            f"- Path: {data.get('path', '?')}",
-        ]
-    if splat in {"werewolf", "garou"}:
-        return [
-            f"**{name}** - Werewolf",
-            f"- Tribe: {data.get('tribe', '?')}",
-            f"- Auspice: {data.get('auspice', '?')}",
-            f"- Breed: {data.get('breed', '?')}",
-            f"- Gnosis: {data.get('gnosis', '?')}",
-        ]
-    if splat in {"mage", "m20"}:
-        return [
-            f"**{name}** - Mage",
-            f"- Tradition: {data.get('tradition', '?')}",
-            f"- Essence: {data.get('essence', '?')}",
-            f"- Paradox: {data.get('paradox', '?')}",
-            f"- Spheres: {data.get('spheres', '?')}",
-        ]
-    if splat in {"demon", "demon20th"}:
-        return [
-            f"**{name}** - Demon",
-            f"- House: {data.get('house', '?')}",
-            f"- Species: {data.get('species', '?')}",
-            f"- Faith: {data.get('faith', '?')}",
-            f"- Torment: {data.get('torment', '?')}",
-        ]
-    if splat in {"changeling", "ctd"}:
-        return [
-            f"**{name}** - Changeling",
-            f"- Kith: {data.get('kith', '?')}",
-            f"- Seeming: {data.get('seeming', '?')}",
-            f"- House: {data.get('house', '?')}",
-            f"- Glamour: {data.get('glamour', '?')}",
-        ]
-    if splat in {"wraith", "wto"}:
-        return [
-            f"**{name}** - Wraith",
-            f"- Legion: {data.get('legion', '?')}",
-            f"- Guild: {data.get('guild', '?')}",
-            f"- Shadow: {data.get('shadow', '?')}",
-            f"- Pathos: {data.get('pathos', '?')}",
-        ]
-    fields = [f"**{name}**"]
-    if data:
-        fields.extend(f"- {k}: {v}" for k, v in data.items())
-    return fields
-
-
-def _sheet_embed(name: str, data: dict) -> dict:
-    splat = str(data.get("splat", "")).strip().lower()
-    fields = _sheet_fields_for_splat(splat, name, data)
-    return {
-        "title": name,
-        "description": "\n".join(fields),
-        "color": 0x8A2BE2,
-    }
-
-
 def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> None:
-    bound = {
+    bound: dict[str, Any] = {
         "reply_ephemeral": None,
         "log_interaction": None,
         "ensure_interaction_command_access": None,
-        "save_guild_settings": None,
     }
     if helpers:
-        bound.update({k: v for k, v in helpers.items() if k in bound})
+        bound.update(helpers)
     reply_ephemeral = bound["reply_ephemeral"]
     log_interaction = bound["log_interaction"]
-    ensure_interaction_command_access = bound["ensure_interaction_command_access"]
-    save_gs = bound["save_guild_settings"]
 
     async def _log(interaction: Any, action: str, reason: str = "", *, success: bool = True) -> None:
         if log_interaction is None:
             return
-        try:
-            await log_interaction(
-                interaction,
-                action=action,
-                reason=reason,
-                success=success,
+        await log_interaction({"guild": getattr(interaction, "guild", None), "user": getattr(interaction, "user", None)}, action=action, reason=reason, success=success)
+
+    async def _enforce_setup(interaction: Any) -> bool:
+        if not getattr(interaction, "guild", None):
+            return False
+        data = chronicle_service.get_chronicle(DND_DB_PATH, int(interaction.guild.id))
+        if not data:
+            await interaction.response.send_message(
+                "No D&D chronicle is set up here yet. Use `/dnd server setup` to choose your edition.",
+                ephemeral=True,
             )
-        except Exception as exc:  # noqa: BLE001
-            log.debug("Discord interaction log failed: %s", exc)
+            return True
+        if not bool(data.get("edition_setup_completed")):
+            label = _edition_label(data.get("edition", "") or "custom")
+            await interaction.response.send_message(
+                f"Edition setup is incomplete: **{label}**. Finish with `/dnd server setup` or rerun `/dnd server restart` to start over.",
+                ephemeral=True,
+            )
+            return True
+        return False
 
-    async def _send(interaction: Any, content: str, *, ephemeral: bool = True) -> None:
-        if reply_ephemeral is not None:
-            await reply_ephemeral(interaction, content)
-            return
-        try:
-            if interaction.response.is_done():
-                await interaction.followup.send(content, ephemeral=ephemeral)
-            else:
-                await interaction.response.send_message(content, ephemeral=ephemeral)
-        except discord.NotFound:
-            try:
-                await interaction.followup.send(content, ephemeral=ephemeral)
-            except discord.HTTPException:
-                pass
-        except discord.HTTPException:
-            pass
+    def _allowed_splats_for_guild(interaction: Any) -> list[str]:
+        if not getattr(interaction, "guild", None):
+            return []
+        data = chronicle_service.get_chronicle(DND_DB_PATH, int(interaction.guild.id))
+        if not data:
+            return []
+        allowed = list(data.get("allowed_splats", []) or [])
+        return allowed
 
-    dnd_group = bot.tree.get_command("dnd")
-    if dnd_group is None:
+    def _edition_for_guild(interaction: Any) -> str:
+        if not getattr(interaction, "guild", None):
+            return "custom"
+        data = chronicle_service.get_chronicle(DND_DB_PATH, int(interaction.guild.id))
+        if not data:
+            return "custom"
+        edition = (data.get("edition") or "custom").strip().lower()
+        return edition
+
+    def _ensure_splat(interaction: Any, splat: str) -> bool:
+        allowed = _allowed_splats_for_guild(interaction)
+        if not allowed:
+            return False
+        return splat in allowed
+
+    def _edition_choices(interaction: Any) -> list[app_commands.Choice]:
+        allowed = _allowed_splats_for_guild(interaction)
+        out: list[app_commands.Choice] = []
+        for name in allowed[:25]:
+            label = editions.splat_label(name)
+            out.append(app_commands.Choice(name=label or name, value=name))
+        return out
+
+    dnd = bot.tree.get_command("dnd")
+    if dnd is None:
         raise RuntimeError("Missing `/dnd` application group.")
 
-    @dnd_group.command(name="roll", description="20th Anniversary Edition dice roll.")
-    async def dice_roll(
-        interaction: discord.Interaction,
-        pool: int,
-        difficulty: int,
+    @dnd.command(name="roll", description="20th / 5th Edition dice roll.")
+    async def roll(
+        interaction: Any,
+        system: str = "20th",
+        pool: int = 1,
+        difficulty: int = 6,
+        modifier: int = 0,
         willpower: bool = False,
-        modifier: int = 0,
         speciality: str | None = None,
-        nightmare: int = 0,
-        no_botch: bool = False,
-        character: str | None = None,
         notes: str | None = None,
     ) -> None:  # type: ignore[misc]
-        if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_roll"):
+        DEBUG_LOGGER.debug("ENTER /dnd roll system=%s pool=%s difficulty=%s modifier=%s", system, pool, difficulty, modifier)
+        log_command(DEBUG_LOGGER, interaction, "roll", system=system, pool=pool, difficulty=difficulty, modifier=modifier, willpower=willpower, speciality=speciality, notes=notes)
+        if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd roll setup not complete guild=%s user=%s", getattr(getattr(interaction, "guild", None), "id", "dm"), getattr(getattr(interaction, "user", None), "id", "unknown"))
             return
-        try:
-            validated_pool = d20.parse_20th_pool(str(pool or ""))
-            validated_diff = d20.parse_difficulty(str(difficulty or ""))
-            validated_nightmare = max(0, min(int(nightmare or 0), validated_pool))
-        except ValueError as exc:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, str(exc))
-            await _log(interaction, "dnd_roll", str(exc), success=False)
+        edition = _edition_for_guild(interaction)
+        edition_info = editions.get_edition(edition)
+        allowed_systems = edition_info.roll_systems if edition_info else []
+        if system not in allowed_systems:
+            label = _edition_label(edition)
+            DEBUG_LOGGER.debug("REJECT /dnd roll invalid system=%s edition=%s allowed=%s", system, edition, allowed_systems)
+            await interaction.response.send_message(
+                f"`/dnd roll system:{system}` is not available for **{label}**. Allowed: {', '.join(allowed_systems)}.",
+                ephemeral=True,
+            )
             return
-        result = d20.roll_pool(validated_pool, validated_diff, validated_nightmare)
-        result.mod = int(modifier)
-        result.willpower = bool(willpower)
-        result.spec = str(speciality or "").strip()
-        result.cancel_ones = bool(no_botch)
-        result.compute()
-        author_name = str(interaction.user.display_name)
-        author_icon = interaction.user.display_avatar.url if interaction.user.display_avatar else None
-        char_name = str(character).strip() if character else None
-        if char_name and interaction.guild_id is not None:
-            resolved = find_character(DND_DB_PATH, int(interaction.guild_id), int(interaction.user.id), char_name)
-            if resolved:
-                char_name = resolved["name"]
+        DEBUG_LOGGER.debug("ACCEPT /dnd roll edition=%s system=%s", edition, system)
         try:
-            emb = d20.build_dice_embed(result, author_name=author_name, author_icon=author_icon, character_name=char_name, notes=notes)
-            await interaction.response.send_message(embed=discord.Embed.from_dict(emb))
-        except Exception:
-            await interaction.response.send_message(str(result.successes))
-        await _log(interaction, "dnd_roll", f"pool={validated_pool} diff={validated_diff} result={result.successes}", success=True)
+            result = route_roll(
+                edition=edition,
+                system=system,
+                pool=pool,
+                difficulty=difficulty,
+                modifier=modifier,
+                hunger=False,
+                nightmare=0,
+                willpower=willpower,
+                speciality=speciality,
+                notes=notes,
+            )
+            lines = [
+                f"Roll `{system}` for {_edition_label(edition)}: pool={result['pool']} diff={result['difficulty']}",
+                f"Dice: {', '.join(str(x) for x in result['dice'])}",
+                f"Successes: {result['successes']} | Outcome: {result['outcome']}",
+            ]
+            if willpower:
+                lines.append("Willpower: spent")
+            if speciality:
+                lines.append(f"Specialty: {speciality}")
+            if notes:
+                lines.append(f"Notes: {notes}")
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd roll result successes=%s outcome=%s", result.get("successes"), result.get("outcome"))
+        except RollError as exc:
+            DEBUG_LOGGER.debug("ERROR /dnd roll router=%s", exc, exc_info=True)
+            await interaction.response.send_message(f"Roll error: {exc}", ephemeral=True)
+        await _log(interaction, "dnd_roll", f"system={system} pool={pool} diff={difficulty}", success=True)
 
-    @dnd_group.command(name="general", description="General multi-set dice roll.")
-    async def dice_general(
-        interaction: discord.Interaction,
-        dice_set_01: str,
+    @roll.autocomplete("system")
+    async def roll_system_autocomplete(interaction: Any, current: str) -> list[app_commands.Choice]:
+        edition = _edition_for_guild(interaction)
+        edition_info = editions.get_edition(edition)
+        allowed = edition_info.roll_systems if edition_info else []
+        out = []
+        for item in allowed:
+            if current.lower() in item.lower():
+                out.append(app_commands.Choice(name=item, value=item))
+        return out[:25]
+
+    @dnd.command(name="sheet", description="Roll a 5th edition sheet pool.")
+    async def sheet(
+        interaction: Any,
+        attribute: str,
+        attribute2: str | None = None,
+        skill: str | None = None,
+        discipline: str | None = None,
+        splat: str = "",
         modifier: int = 0,
-        dice_set_02: str | None = None,
-        dice_set_03: str | None = None,
-        dice_set_04: str | None = None,
-        dice_set_05: str | None = None,
-        difficulty: int | None = None,
+        difficulty: int = 6,
         notes: str | None = None,
     ) -> None:  # type: ignore[misc]
-        if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_general"):
+        DEBUG_LOGGER.debug("ENTER /dnd sheet splat=%s attribute=%s modifier=%s difficulty=%s", splat, attribute, modifier, difficulty)
+        log_command(DEBUG_LOGGER, interaction, "sheet", attribute=attribute, attribute2=attribute2, skill=skill, discipline=discipline, splat=splat, modifier=modifier, difficulty=difficulty, notes=notes)
+        if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd sheet setup not complete")
             return
-        try:
-            sets = general_roll.parse_sets(dice_set_01, dice_set_02, dice_set_03, dice_set_04, dice_set_05)
-        except ValueError as exc:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, str(exc))
-            await _log(interaction, "dnd_general", str(exc), success=False)
-            return
-        author_name = str(interaction.user.display_name)
-        author_icon = interaction.user.display_avatar.url if interaction.user.display_avatar else None
-        emb = general_roll.build_general_embed(
-            sets, modifier=modifier, difficulty=difficulty, notes=notes, author_name=author_name, author_icon=author_icon
-        )
-        await interaction.response.send_message(embed=discord.Embed.from_dict(emb))
-        await _log(interaction, "dnd_general", f"sets={len(sets)}", success=True)
-
-    @dnd_group.command(name="initiative", description="Initiative tracker helpers.")
-    async def dice_initiative(
-        interaction: discord.Interaction, action: str = "new", dex_wits: int = 0, character: str | None = None, notes: str | None = None
-    ) -> None:  # type: ignore[misc]
-        if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_initiative"):
-            return
-        if not interaction.guild:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "This command can only be used in a server.")
-            return
-        channel_id = interaction.channel_id
-        guild_id = interaction.guild.id
-        owner_id = interaction.user.id
-        if action == "new":
-            tracker = initiative_domain.InitiativeTracker(channel_id=channel_id, guild_id=guild_id, owner_id=owner_id)
-            tracker.characters.append(
-                initiative_domain.InitiativeCharacter(
-                    member_id=owner_id, display_name=interaction.user.display_name, dex_wits=max(1, int(dex_wits or 0))
-                )
+        edition = _edition_for_guild(interaction)
+        edition_info = editions.get_edition(edition)
+        allowed = _allowed_splats_for_guild(interaction)
+        if splat and splat not in allowed:
+            label = _edition_label(edition)
+            DEBUG_LOGGER.debug("REJECT /dnd sheet splat=%s edition=%s allowed=%s", splat, edition, allowed)
+            await interaction.response.send_message(
+                f"`splat:{splat}` is not allowed under **{label}**. Choose from: {', '.join(allowed)}.",
+                ephemeral=True,
             )
-            tracker.characters[-1].compute()
-            save_tracker(DND_DB_PATH, tracker)
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Started a new initiative tracker.")
-        elif action == "roll":
-            tracker = load_tracker(DND_DB_PATH, channel_id)
-            if not tracker:
-                if reply_ephemeral:
-                    await reply_ephemeral(interaction, "No tracker in this channel. Start with `new`.")
-                return
-            char = initiative_domain.InitiativeCharacter(
-                member_id=owner_id, display_name=interaction.user.display_name, dex_wits=max(1, int(dex_wits or 0))
-            )
-            char.compute()
-            tracker.characters.append(char)
-            save_tracker(DND_DB_PATH, tracker)
-            order = sorted(tracker.characters, key=lambda x: (-x.total, x.member_id))
-            lines = [f"Initiative rolled for {char.display_name}: **{char.total}**", "Order:"]
-            lines.extend(f"- {c.display_name}: {c.total}" for c in order)
-            await interaction.response.send_message("\n".join(lines))
-            await _log(interaction, "dnd_initiative", f"action={action} total={char.total}", success=True)
-        elif action == "end":
-            tracker = load_tracker(DND_DB_PATH, channel_id)
-            if tracker:
-                _end_tracker(DND_DB_PATH, channel_id)
-                await interaction.response.send_message("Ended this channel's initiative tracker.", ephemeral=True)
-            else:
-                await interaction.response.send_message("No active tracker in this channel.", ephemeral=True)
+            return
+        system = edition_info.roll_systems[0] if edition_info and edition_info.roll_systems else edition
+        sheet_supported = bool(edition_info.sheet_roll_supported) if edition_info else False
+        guild_id = int(interaction.guild.id)
+        user_id = int(interaction.user.id)
+        if sheet_supported:
+            fields = _resolve_default_character_fields(DND_DB_PATH, guild_id, user_id)
+            base_pool = 3
+            attribute_value = _resolve_attribute_for_sheet(edition, attribute, fields)
+            if attribute_value:
+                base_pool += attribute_value
+            skill_value = _resolve_skill_for_sheet(skill, fields)
+            if skill_value:
+                base_pool += skill_value
+            actual_pool = max(1, base_pool + int(modifier or 0))
+            DEBUG_LOGGER.debug("EXECUTE /dnd sheet system=%s hunger=%s pool=%s", system, bool(discipline), actual_pool)
+            try:
+                result = route_roll(edition=edition, system=system or edition, pool=actual_pool, difficulty=difficulty, hunger=bool(discipline))
+                if discipline:
+                    result["outcome"] = result.get("outcome", "") + " (Hunger)"
+                lines = [
+                    f"Sheet roll for `{edition}`: pool={result['pool']} diff={difficulty}",
+                    f"Dice: {', '.join(str(x) for x in result['dice'])}",
+                    f"Successes: {result['successes']} | Outcome: {result['outcome']}",
+                ]
+                if attribute:
+                    lines.append(f"Attribute: {attribute}")
+                if skill:
+                    lines.append(f"Skill: {skill}")
+                await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            except RollError as exc:
+                DEBUG_LOGGER.debug("ERROR /dnd sheet engine=%s", exc, exc_info=True)
+                await interaction.response.send_message(f"Sheet roll engine error: {exc}", ephemeral=True)
         else:
-            await interaction.response.send_message("Use `new`, `roll`, or `end`.", ephemeral=True)
+            DEBUG_LOGGER.debug("SKIP /dnd sheet sheet_roll_supported=False for %s", edition)
+            await interaction.response.send_message(
+                f"Sheet rolls are not enabled for **{_edition_label(edition)}**.",
+                ephemeral=True,
+            )
+        await _log(interaction, "dnd_sheet", f"attribute={attribute} skill={skill} splat={splat}", success=True)
 
-    @dnd_group.command(name="character", description="Storage-backed character helpers.")
-    async def dice_character(
-        interaction: discord.Interaction,
-        action: str = "find",
-        splat: str | None = None,
-        name: str | None = None,
-        payload: str | None = None,
-    ) -> None:  # type: ignore[misc]
-        await _run_character_command(interaction, action=action, splat=splat, name=name, payload=payload)
+    @sheet.autocomplete("splat")
+    async def sheet_splat_autocomplete(interaction: Any, current: str) -> list[app_commands.Choice]:
+        allowed = _edition_choices(interaction)
+        out = []
+        for choice in allowed:
+            if current.lower() in choice.value.lower() or current.lower() in choice.name.lower():
+                out.append(choice)
+        return out[:25]
 
-    @app_commands.describe(
-        action="Create, send, list, or delete a proxy.",
-        name="Proxy name.",
-        template="Message template. `{name}` and `{content}` are replaced.",
-        avatar_url="Avatar URL for the proxy.",
-        message="Optional message text to send.",
-    )
-    @dnd_group.command(name="proxy", description="Proxy identity helpers.")
-    async def dice_proxy(
-        interaction: discord.Interaction,
-        action: str = "create",
-        name: str = "",
-        template: str = "{name}: {content}",
-        avatar_url: str = "",
-        message: str | None = None,
-    ) -> None:  # type: ignore[misc]
-        await _run_proxy_command(interaction, action=action, name=name, template=template, avatar_url=avatar_url, message=message)
+    @dnd.command(name="setup", description="Edition-aware D&D setup helpers.")
+    async def setup(interaction: Any, action: str = "show") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd setup action=%s", action)
+        log_command(DEBUG_LOGGER, interaction, "setup", action=action)
+        if not interaction.guild:
+            DEBUG_LOGGER.debug("BLOCKED /dnd setup dm_context")
+            await interaction.response.send_message("Use in a server.", ephemeral=True)
+            return
+        allowed = _allowed_splats_for_guild(interaction)
+        data = chronicle_service.get_chronicle(DND_DB_PATH, int(interaction.guild.id))
+        edition = (data or {}).get("edition") or "custom"
+        label = _edition_label(edition)
+        DEBUG_LOGGER.debug("EXECUTE /dnd setup edition=%s allowed=%s", edition, allowed)
+        lines = [
+            f"Edition: {label}",
+            f"Setup complete: {bool((data or {}).get('edition_setup_completed'))}",
+            f"Allowed splats/species: {', '.join(allowed) if allowed else 'none - rerun /dnd server setup'}",
+        ]
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        await _log(interaction, "dnd_setup", f"edition={edition}", success=True)
+        DEBUG_LOGGER.debug("ACCEPT /dnd setup edition=%s", edition)
 
-    @dnd_group.command(name="chronicle", description="Chronicle server helpers.")
-    async def dice_chronicle(interaction: discord.Interaction, action: str = "create", name: str = "Chronicle") -> None:  # type: ignore[misc]
-        if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_chronicle"):
+    @dnd.command(name="info", description="Edition/splat reference info.")
+    async def info(interaction: Any, topic: str = "edition", choice: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd info topic=%s choice=%s", topic, choice)
+        log_command(DEBUG_LOGGER, interaction, "info", topic=topic, choice=choice)
+        if topic == "edition":
+            edition = choice.strip().lower() if choice else _edition_for_guild(interaction)
+            if not edition:
+                await interaction.response.send_message("Specify an edition: `20th`, `5e`, `custom`.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd info missing edition")
+                return
+            info_data = editions.edition_help(edition)
+            reference = (
+                f"\nReference: {editions.WIKI_REFERENCE_URL}\n"
+                f"Summary: {editions.WIKI_SUMMARY}"
+            )
+            await interaction.response.send_message(info_data + reference, ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd info edition=%s", edition)
+        elif topic == "splat":
+            splat = choice.strip()
+            edition = _edition_for_guild(interaction)
+            allowed = _allowed_splats_for_guild(interaction)
+            if splat not in allowed and allowed:
+                await interaction.response.send_message(f"`{splat}` is not in this edition's allowed list.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd info bad splat=%s edition=%s", splat, edition)
+                return
+            edition_key = edition or "custom"
+            edition_info = editions.get_edition(edition_key)
+            meta = (edition_info.splat_metadata or {}).get(splat) if edition_info else None
+            if meta:
+                lines = [f"Splat: {meta.get('name', splat)}", f"Edition: {_edition_label(edition_key)}", f"Slug: {meta.get('slug', splat)}"]
+                if meta.get("sheetSlug"):
+                    lines.append(f"Sheet slug: {meta.get('sheetSlug')}")
+                await interaction.response.send_message("\n".join(lines), ephemeral=True)
+                DEBUG_LOGGER.debug("ACCEPT /dnd info splat=%s edition=%s", splat, edition_key)
+            else:
+                await interaction.response.send_message(f"No metadata for `{splat}` under {_edition_label(edition_key)}.", ephemeral=True)
+        else:
+            DEBUG_LOGGER.debug("REJECT /dnd info bad topic=%s choice=%s", topic, choice)
+            await interaction.response.send_message("Use `info edition:<choice>` or `info splat:<choice>`.", ephemeral=True)
+        await _log(interaction, "dnd_info", f"topic={topic} choice={choice}", success=True)
+
+    @dnd.command(name="character", description="Edition-aware character helpers.")
+    async def character(interaction: Any, action: str = "show", name: str = "", splat: str = "", field: str = "", value: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd character action=%s name=%s splat=%s field=%s value=%s", action, name, splat, field, value)
+        log_command(DEBUG_LOGGER, interaction, "character", action=action, name=name, splat=splat, field=field, value=value)
+        if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd character setup not complete")
             return
         if not interaction.guild:
             if reply_ephemeral:
-                await reply_ephemeral(interaction, "Guild context is required for chronicle commands.")
+                await reply_ephemeral(interaction, "Use in a server.")
+            DEBUG_LOGGER.debug("REJECT /dnd character dm_context")
             return
         guild_id = int(interaction.guild.id)
-        owner_id = int(interaction.user.id)
+        user_id = int(interaction.user.id)
+        edition = _edition_for_guild(interaction)
+        allowed = _allowed_splats_for_guild(interaction)
         if action == "create":
-            data = chronicle_service.create_chronicle(DND_DB_PATH, guild_id, owner_id, name=name)
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, f"Created chronicle `{data['name']}`.")
-        elif action == "show":
-            data = chronicle_service.get_chronicle(DND_DB_PATH, guild_id)
-            if not data:
-                if reply_ephemeral:
-                    await reply_ephemeral(interaction, "No chronicle in this server.")
+            if not name:
+                await interaction.response.send_message("Provide character name.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd character create missing name")
                 return
-            monitored = len(data.get("monitored_channel_ids", []))
-            excluded = len(data.get("excluded_channel_ids", []))
+            splat_key = splat or (allowed[0] if allowed else "custom")
+            if allowed and splat_key not in allowed:
+                await interaction.response.send_message(
+                    f"`{splat_key}` is not allowed for this edition. Allowed: {', '.join(allowed)}",
+                    ephemeral=True,
+                )
+                DEBUG_LOGGER.debug("REJECT /dnd character create invalid splat=%s allowed=%s", splat_key, allowed)
+                return
+            upsert_member(DND_DB_PATH, guild_id, user_id, default_character=name)
+            template = character_builder.sheet_template(splat_key)
+            payload = {"splat": splat_key, "fields": template}
+            character_service.save_character(DND_DB_PATH, guild_id, user_id, splat_key, name, payload)
             lines = [
-                f"Chronicle: {data['name']}",
-                f"XP tracking: {data['xp_tracking_enabled']}",
-                f"Auto rewards: {data['auto_reward_enabled']}",
-                f"Monitored channels: {monitored}",
-                f"Excluded channels: {excluded}",
+                f"Created character `{name}` for `{splat_key}`.",
+                "Template fields: " + ", ".join(template.keys()),
             ]
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "\n".join(lines))
-            else:
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd character create name=%s splat=%s template_fields=%d", name, splat_key, len(template))
+        elif action == "show":
+            target_name = name.strip()
+            if not target_name:
+                chars = character_service.list_characters(DND_DB_PATH, guild_id, user_id)
+                if not chars:
+                    await interaction.response.send_message("No characters found. Use `/dnd character create`.", ephemeral=True)
+                    DEBUG_LOGGER.debug("REJECT /dnd character show empty")
+                    return
+                lines = ["Characters:"] + [f"- {c['name']} ({c['splat']})" for c in chars]
                 await interaction.response.send_message("\n".join(lines), ephemeral=True)
-        elif action == "update":
-            chronicle_service.update_chronicle(DND_DB_PATH, guild_id, name=name, owner_id=owner_id)
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Updated chronicle settings.")
+                DEBUG_LOGGER.debug("ACCEPT /dnd character show list count=%d", len(chars))
+                return
+            record = character_service.find_character(DND_DB_PATH, guild_id, user_id, target_name)
+            if not record:
+                await interaction.response.send_message(f"Character `{target_name}` not found.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd character show missing name=%s", target_name)
+                return
+            data = record.get("data", {})
+            fields = data.get("fields") or {}
+            splat_for_edition = record.get("splat") or ""
+            splat_edition = _edition_for_splat(splat_for_edition)
+            edition_key = edition or (splat_edition.key if splat_edition else "custom")
+            derived = build_derived(edition_key, fields)
+            lines = [
+                f"**{record['name']}** | {record['splat']} | {_edition_label(edition_key)}",
+                render_ability_block(edition_key, derived),
+                render_derived(edition_key, derived),
+            ]
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd character show name=%s edition=%s", target_name, edition_key)
+        elif action == "edit":
+            target_name = name.strip()
+            if not target_name or not field:
+                await interaction.response.send_message("Provide `name` and `field` to edit.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd character edit missing fields")
+                return
+            record = character_service.find_character(DND_DB_PATH, guild_id, user_id, target_name)
+            if not record:
+                await interaction.response.send_message(f"Character `{target_name}` not found.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd character edit missing name=%s", target_name)
+                return
+            data = record.get("data", {})
+            fields = data.get("fields") or {}
+            fields[field] = value
+            data["fields"] = fields
+            character_service.save_character(DND_DB_PATH, guild_id, user_id, record["splat"], target_name, data)
+            await interaction.response.send_message(f"Updated `{field}` for `{target_name}`.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd character edit name=%s field=%s", target_name, field)
+        elif action == "delete":
+            target_name = name.strip()
+            if not target_name:
+                await interaction.response.send_message("Provide `name` to delete.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd character delete missing name")
+                return
+            removed = character_service.delete_character(DND_DB_PATH, guild_id, user_id, target_name)
+            await interaction.response.send_message("Deleted." if removed else "Character not found.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd character delete name=%s removed=%s", target_name, removed)
         else:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Use `create`, `show`, or `update`.")
+            DEBUG_LOGGER.debug("REJECT /dnd character bad action=%s", action)
+            await interaction.response.send_message("Use `create`, `show`, `edit`, `list`, or `delete`.", ephemeral=True)
 
-    @dnd_group.command(name="xp", description="Experience point helpers.")
-    async def dice_xp(interaction: discord.Interaction, action: str = "add", amount: float = 1.0, reason: str = "") -> None:  # type: ignore[misc]
-        if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_xp"):
+    @dnd.command(name="xp", description="XP tracking helpers.")
+    async def xp(interaction: Any, action: str = "add", amount: float = 1.0, reason: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd xp action=%s amount=%s reason=%s", action, amount, reason)
+        log_command(DEBUG_LOGGER, interaction, "xp", action=action, amount=amount, reason=reason)
+        if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd xp setup not complete")
             return
         if not interaction.guild:
             if reply_ephemeral:
-                await reply_ephemeral(interaction, "Guild context is required for XP commands.")
+                await reply_ephemeral(interaction, "Use in a server.")
             return
         guild_id = int(interaction.guild.id)
         user_id = int(interaction.user.id)
         if action == "add":
-            add_xp(DND_DB_PATH, guild_id, user_id, float(amount), reason or "XP from command")
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, f"Added {amount} XP.")
+            add_xp(DND_DB_PATH, guild_id, user_id, float(amount), reason or "XP from slash")
+            await interaction.response.send_message(f"Added {amount} XP.", ephemeral=True)
         elif action == "history":
-            entries = list_xp_entries(DND_DB_PATH, guild_id, user_id)
+            entries = chronicle_service.list_xp_entries(DND_DB_PATH, guild_id, user_id)
             if not entries:
-                if reply_ephemeral:
-                    await reply_ephemeral(interaction, "No XP history.")
+                await interaction.response.send_message("No XP history.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd xp history empty guild=%s user=%s", guild_id, user_id)
                 return
             lines = "\n".join(f"- {e['amount']}: {e['reason']}" for e in entries[-10:])
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, lines)
-            else:
-                await interaction.response.send_message(lines, ephemeral=True)
+            await interaction.response.send_message(lines, ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd xp history guild=%s user=%s entries=%d", guild_id, user_id, len(entries))
         else:
+            DEBUG_LOGGER.debug("REJECT /dnd xp bad action=%s", action)
             await interaction.response.send_message("Use `add` or `history`.", ephemeral=True)
 
-    @dnd_group.command(name="reward", description="Auto reward helpers.")
-    async def dice_reward(
-        interaction: discord.Interaction, action: str = "status", rule_name: str = "", threshold: int = 10, reward: float = 1.0
-    ) -> None:  # type: ignore[misc]
-        if ensure_interaction_command_access and not await ensure_interaction_command_access(interaction, "dnd_reward"):
+    @dnd.command(name="reward", description="Auto reward helpers.")
+    async def reward(interaction: Any, action: str = "status", rule_name: str = "", threshold: int = 10, reward: float = 1.0) -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd reward action=%s rule_name=%s threshold=%s reward=%s", action, rule_name, threshold, reward)
+        log_command(DEBUG_LOGGER, interaction, "reward", action=action, rule_name=rule_name, threshold=threshold, reward=reward)
+        if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd reward setup not complete")
             return
         if not interaction.guild:
             if reply_ephemeral:
-                await reply_ephemeral(interaction, "Guild context is required for reward commands.")
+                await reply_ephemeral(interaction, "Use in a server.")
+            DEBUG_LOGGER.debug("REJECT /dnd reward dm_context")
             return
         guild_id = int(interaction.guild.id)
         user_id = int(interaction.user.id)
         if action == "create":
             if not rule_name:
-                if reply_ephemeral:
-                    await reply_ephemeral(interaction, "Provide rule_name.")
+                await interaction.response.send_message("Provide rule_name.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd reward create missing rule_name")
                 return
             rule = create_reward_rule(DND_DB_PATH, guild_id, rule_name)
             upsert_reward_tier(DND_DB_PATH, rule["id"], idx=0, threshold=int(threshold), reward=float(reward))
             await interaction.response.send_message(f"Created reward rule `{rule_name}`.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd reward create rule_name=%s threshold=%s reward=%s", rule_name, threshold, reward)
         elif action == "status":
             stats = evaluate_rewards(DND_DB_PATH, guild_id, user_id)
             if not stats:
@@ -440,208 +584,284 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
                     pct = int(min(100, r.get("current_count", 0) / max(1, r.get("threshold", 1)) * 100))
                     lines.append(f"- {r.get('name')}: {r.get('current_count')}/{r.get('threshold')} ({pct}%)")
                 content = "\n".join(lines)
-            await interaction.response.send_message(content, ephemeral=True)
-        elif action == "ledger":
-            stats = evaluate_rewards(DND_DB_PATH, guild_id, user_id)
-            if not stats:
-                content = "No active reward rules or no XP tracking."
-            else:
-                lines = []
-                for r in stats:
-                    pct = int(min(100, r.get("current_count", 0) / max(1, r.get("threshold", 1)) * 100))
-                    lines.append(f"- {r.get('name')}: {r.get('current_count')}/{r.get('threshold')} ({pct}%)")
-                content = "\n".join(lines)
-            await interaction.response.send_message(content, ephemeral=True)
+            await interaction.response.send_message(content or "No data.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd reward status guild=%s user=%s rules=%d", guild_id, user_id, len(stats))
         else:
-            await interaction.response.send_message("Use `create`, `status`, or `ledger`.", ephemeral=True)
+            DEBUG_LOGGER.debug("REJECT /dnd reward bad action=%s", action)
+            await interaction.response.send_message("Use `create` or `status`.", ephemeral=True)
 
-    @dnd_group.command(name="scope-set", description="Restrict D&D commands to a Discord category.")
-    @app_commands.describe(category="Discord category to allow D&D commands in, including its sub-channels/threads.")
-    async def dice_scope_set(interaction: discord.Interaction, category: discord.CategoryChannel) -> None:  # type: ignore[misc]
-        if not interaction.guild or category.guild is None or category.guild.id != interaction.guild.id:
+    @dnd.command(name="server", description="D&D server/chronicle settings.")
+    async def server(interaction: Any, action: str = "show", name: str = "Chronicle", edition: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd server action=%s name=%s edition=%s", action, name, edition)
+        log_command(DEBUG_LOGGER, interaction, "server", action=action, name=name, edition=edition)
+        if not interaction.guild:
+            DEBUG_LOGGER.debug("BLOCKED /dnd server dm_context")
             if reply_ephemeral:
-                await reply_ephemeral(interaction, "Choose a category from this server.")
+                await reply_ephemeral(interaction, "Use in a server.")
             return
-        if save_gs:
+        guild_id = int(interaction.guild.id)
+        if action == "setup":
+            if not edition:
+                DEBUG_LOGGER.debug("REJECT /dnd server missing edition")
+                await interaction.response.send_message("Choose an edition: `/dnd server setup edition:20th`", ephemeral=True)
+                return
+            label = _edition_label(edition)
+            defaults = _edition_defaults(edition)
+            DEBUG_LOGGER.debug("EXECUTE /dnd server setup edition=%s defaults=%s", edition, defaults)
+            chronicle_service.update_chronicle(
+                DND_DB_PATH,
+                guild_id,
+                edition=edition,
+                edition_setup_completed=1,
+                allowed_splats=defaults,
+                owner_id=int(interaction.user.id),
+            )
+            splats_hint = ", ".join(defaults) if defaults else "none"
+            await interaction.response.send_message(
+                f"Edition set to **{label}**. Default splats/species: {splats_hint}. Use `/dnd server update` to change settings.",
+                ephemeral=True,
+            )
+        elif action == "restart":
+            data = chronicle_service.get_chronicle(DND_DB_PATH, guild_id)
+            chronicle_service.update_chronicle(
+                DND_DB_PATH,
+                guild_id,
+                edition="",
+                edition_setup_completed=0,
+                allowed_splats=[],
+                owner_id=int(interaction.user.id),
+            )
+            await interaction.response.send_message(
+                "D&D setup has been reset. Use `/dnd server setup edition:<choice>` to start again.",
+                ephemeral=True,
+            )
+        elif action == "show":
+            data = chronicle_service.get_chronicle(DND_DB_PATH, guild_id)
+            if not data:
+                await interaction.response.send_message("No chronicle in this server. Use `/dnd server setup`.", ephemeral=True)
+                return
+            monitored = len(data.get("monitored_channel_ids", []))
+            excluded = len(data.get("excluded_channel_ids", []))
+            edition = data.get("edition") or "unset"
+            setup = "complete" if data.get("edition_setup_completed") else "incomplete"
+            lines = [
+                f"Chronicle: {data['name']}",
+                f"Edition: {_edition_label(edition)} ({setup})",
+                f"Allowed splats/species: {', '.join(data.get('allowed_splats', [])) or 'none'}",
+                f"XP tracking: {'on' if data['xp_tracking_enabled'] else 'off'}",
+                f"Auto rewards: {'on' if data['auto_reward_enabled'] else 'off'}",
+                f"Monitored channels: {monitored}",
+                f"Excluded channels: {excluded}",
+            ]
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        else:
+            data = chronicle_service.get_chronicle(DND_DB_PATH, guild_id)
+            if not data:
+                await interaction.response.send_message("No chronicle in this server. Use `/dnd server setup`.", ephemeral=True)
+                return
+            current_owner = int(data.get("owner_id") or 0)
+            actor = int(interaction.user.id)
+            if current_owner and current_owner != actor:
+                await interaction.response.send_message("Only the chronicle owner can update settings.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd server update not owner actor=%s owner=%s", actor, current_owner)
+                return
+            update_chronicle(DND_DB_PATH, guild_id, name=name, owner_id=current_owner or actor)
+            await interaction.response.send_message("Updated chronicle settings.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd server update name=%s owner=%s", name, current_owner or actor)
+
+    @dnd.command(name="group", description="Proxy group CRUD.")
+    async def group(interaction: Any, action: str = "list", name: str = "", description: str = "", proxy: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd group action=%s name=%s description=%s proxy=%s", action, name, description, proxy)
+        log_command(DEBUG_LOGGER, interaction, "group", action=action, name=name, description=description, proxy=proxy)
+        if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd group setup not complete")
+            return
+        if not interaction.guild:
+            if reply_ephemeral:
+                await reply_ephemeral(interaction, "Use in a server.")
+            DEBUG_LOGGER.debug("REJECT /dnd group dm_context")
+            return
+        guild_id = int(interaction.guild.id)
+        user_id = int(interaction.user.id)
+        if action == "create":
+            if not name:
+                await interaction.response.send_message("Provide group name.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd group create missing name")
+                return
+            proxy_group_service.create_proxy_group(DND_DB_PATH, guild_id, user_id, name, description)
+            await interaction.response.send_message(f"Created proxy group `{name}`.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd group create name=%s", name)
+        elif action == "add":
+            if not name or not proxy:
+                await interaction.response.send_message("Provide group name and proxy name.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd group add missing fields")
+                return
+            result = proxy_group_service.add_proxy_to_group(DND_DB_PATH, guild_id, user_id, name, proxy)
+            if not result:
+                await interaction.response.send_message("Proxy not found.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd group add proxy not found group=%s proxy=%s", name, proxy)
+                return
+            await interaction.response.send_message(f"Added proxy `{proxy}` to group `{name}`.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd group add group=%s proxy=%s", name, proxy)
+        elif action == "remove":
+            if not name or not proxy:
+                await interaction.response.send_message("Provide group name and proxy name.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd group remove missing fields")
+                return
+            removed = proxy_group_service.remove_proxy_from_group(DND_DB_PATH, guild_id, user_id, name, proxy)
+            await interaction.response.send_message("Removed." if removed else "Proxy not in group.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd group remove group=%s proxy=%s removed=%s", name, proxy, removed)
+        elif action == "list":
+            groups = proxy_group_service.list_proxy_groups(DND_DB_PATH, guild_id, user_id)
+            if not groups:
+                await interaction.response.send_message("No proxy groups yet.", ephemeral=True)
+                DEBUG_LOGGER.debug("ACCEPT /dnd group list empty")
+                return
+            lines = []
+            for g in groups:
+                members = proxy_group_service.list_group_proxies(DND_DB_PATH, guild_id, user_id, g["name"])
+                members_hint = ", ".join(m.get("name", "") for m in members) if members else "empty"
+                lines.append(f"- {g['name']}: {members_hint}")
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd group list groups=%d", len(groups))
+        else:
+            DEBUG_LOGGER.debug("REJECT /dnd group bad action=%s", action)
+            await interaction.response.send_message("Use `create`, `add`, `remove`, or `list`.", ephemeral=True)
+
+    @dnd.command(name="reproxy", description="Reproxy/message tracking helpers.")
+    async def reproxy(interaction: Any, action: str = "list", group: str = "", proxy: str = "", target_channel: str = "", source_message: str = "", content: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd reproxy action=%s group=%s proxy=%s target_channel=%s source_message=%s", action, group, proxy, target_channel, source_message)
+        log_command(DEBUG_LOGGER, interaction, "reproxy", action=action, group=group, proxy=proxy, target_channel=target_channel, source_message=source_message, content=content)
+        if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd reproxy setup not complete")
+            return
+        if not interaction.guild:
+            if reply_ephemeral:
+                await reply_ephemeral(interaction, "Use in a server.")
+            DEBUG_LOGGER.debug("REJECT /dnd reproxy dm_context")
+            return
+        guild_id = int(interaction.guild.id)
+        user_id = int(interaction.user.id)
+        if action == "create":
+            if not group or not proxy or not target_channel:
+                await interaction.response.send_message("Provide group, proxy, and target_channel.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd reproxy create missing fields")
+                return
             try:
-                save_gs(
-                    int(interaction.guild.id),
-                    payload={"dnd_category_id": int(category.id)},
-                    actor_email="",
-                )
-            except Exception:
-                pass
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, f"D&D commands are now restricted to `{category.name}`.")
-
-    @dnd_group.command(name="scope-get", description="Show the allowed D&D category, if set.")
-    async def dice_scope_get(interaction: discord.Interaction) -> None:  # type: ignore[misc]
-        message = "D&D category restriction is not enabled yet in this build."
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, message)
-
-    @dnd_group.command(name="scope-clear", description="Remove the D&D category restriction.")
-    async def dice_scope_clear(interaction: discord.Interaction) -> None:  # type: ignore[misc]
-        if save_gs:
-            try:
-                save_gs(
-                    int(interaction.guild.id) if interaction.guild else 0,
-                    payload={"dnd_category_id": 0},
-                    actor_email="",
-                )
-            except Exception:
-                pass
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, "D&D category restriction cleared.")
-
-
-def _end_tracker(db_path: str, channel_id: int) -> None:
-    import sqlite3
-
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("DELETE FROM initiative_trackers WHERE channel_id = ?", (int(channel_id),))
-
-
-async def _run_character_command(
-    interaction: Any,
-    *,
-    action: str,
-    splat: str | None,
-    name: str | None,
-    payload: str | None,
-) -> None:
-    reply_ephemeral = bound["reply_ephemeral"] if bound is not None else None
-
-    if action != "show" and not getattr(interaction, "guild", None):
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, "This command can only be used in a server.")
-        return
-    guild_id = int(interaction.guild.id) if interaction.guild else 0
-    user_id = int(interaction.user.id) if interaction.user else 0
-    if action == "create":
-        data = json.loads(payload or "{}") if payload else {}
-        save_character(
-            DND_DB_PATH,
-            guild_id,
-            user_id,
-            name=str(name or "").strip() or "Unnamed",
-            data=data,
-            splat=str(splat or "").strip() or None,
-        )
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, "Character saved.")
-    elif action == "find":
-        if not name:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Provide a character name.")
-            return
-        row = find_character(DND_DB_PATH, guild_id, user_id, str(name).strip())
-        if not row:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Character not found.")
-            return
-        emb = _sheet_embed(row["name"], row)
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, embed=discord.Embed.from_dict(emb))
+                channel_id = int(target_channel)
+            except ValueError:
+                await interaction.response.send_message("target_channel must be a channel ID.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd reproxy invalid target_channel=%s", target_channel)
+                return
+            proxy_row = proxy_service.get_proxy(DND_DB_PATH, guild_id, user_id, proxy)
+            if not proxy_row:
+                await interaction.response.send_message("Proxy not found.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd reproxy proxy not found proxy=%s", proxy)
+                return
+            proxy_group_service.record_reproxy(
+                DND_DB_PATH,
+                guild_id=guild_id,
+                target_channel_id=channel_id,
+                owner_id=user_id,
+                group_name=group,
+                proxy_id=int(proxy_row["id"]),
+                source_message_id=source_message,
+                content=content,
+            )
+            await interaction.response.send_message(f"Recorded reproxy to <#{channel_id}> for `{proxy}` from `{group}`.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd reproxy create group=%s proxy=%s channel=%s", group, proxy, channel_id)
+        elif action == "list":
+            jobs = proxy_group_service.list_reproxy_jobs(DND_DB_PATH, guild_id, user_id)
+            if not jobs:
+                await interaction.response.send_message("No reproxy jobs yet.", ephemeral=True)
+                DEBUG_LOGGER.debug("ACCEPT /dnd reproxy list empty")
+                return
+            lines = "\n".join(
+                f"- {j['created_at']}: {j['group_name']} -> <#{j['target_channel_id']}> proxy={j['proxy_id']} src={j['source_message_id']}"
+                for j in jobs[:20]
+            )
+            await interaction.response.send_message(lines, ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd reproxy list jobs=%d", len(jobs))
         else:
-            await interaction.response.send_message(embed=discord.Embed.from_dict(emb))
-    elif action == "list":
-        rows = list_characters(DND_DB_PATH, guild_id, user_id)
-        if not rows:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "No characters saved.")
-            return
-        lines = [f"- {row['name']}" for row in rows]
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, "\n".join(lines))
-        else:
-            await interaction.response.send_message("\n".join(lines))
-    elif action == "delete":
-        if not name:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Provide a character name.")
-            return
-        delete_char_repo(DND_DB_PATH, guild_id, user_id, str(name).strip())
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, "Character deleted.")
-    else:
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, "Use `create`, `find`, `list`, or `delete`.")
+            DEBUG_LOGGER.debug("REJECT /dnd reproxy bad action=%s", action)
+            await interaction.response.send_message("Use `create` or `list`.", ephemeral=True)
 
-
-async def _run_proxy_command(
-    interaction: Any,
-    *,
-    action: str,
-    name: str,
-    template: str,
-    avatar_url: str,
-    message: str | None,
-) -> None:
-    reply_ephemeral = bound["reply_ephemeral"] if bound is not None else None
-    if not getattr(interaction, "guild", None):
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, "This command can only be used in a server.")
-        return
-    guild_id = int(interaction.guild.id)
-    owner_id = int(interaction.user.id)
-    if action == "create":
-        if not name:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Provide a proxy name.")
+    @dnd.command(name="ini", description="Edition-aware initiative tracker.")
+    async def ini(interaction: Any, action: str = "status", member: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd ini action=%s channel=%s", action, getattr(getattr(interaction, "channel", None), "id", "unknown"))
+        if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd ini setup not complete")
             return
-        add_proxy_identity(
-            DND_DB_PATH,
-            guild_id,
-            owner_id,
-            name=str(name).strip(),
-            template=str(template or "").strip() or "{name}: {content}",
-            avatar_url=str(avatar_url or "").strip() or None,
-        )
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, f"Proxy `{name}` created.")
-    elif action == "send":
-        if not message:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Provide a message to send.")
+        if not interaction.guild:
+            DEBUG_LOGGER.debug("REJECT /dnd ini dm_context")
+            await interaction.response.send_message("Use in a server.", ephemeral=True)
             return
-        proxy = get_proxy(DND_DB_PATH, guild_id, owner_id, str(name).strip())
-        if not proxy:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Proxy not found.")
-            return
-        text = str(proxy.get("template") or "{name}: {content}").replace("{name}", proxy["name"]).replace("{content}", str(message))
-        avatar = proxy.get("avatar_url")
-        webhook = None
-        if avatar:
-            webhooks = [wh for wh in await interaction.guild.webhooks() if wh.channel_id == interaction.channel_id]
-            if webhooks:
-                webhook = webhooks[0]
-        if webhook is None:
-            await interaction.response.send_message(text, ephemeral=True if not webhook else False)
+        guild_id = int(interaction.guild.id)
+        user_id = int(interaction.user.id)
+        channel_id = int(interaction.channel.id)
+        from dnd import initiative_repo
+        from dnd.initiative import InitiativeCharacter, InitiativeTracker
+        if action == "start":
+            tracker = InitiativeTracker(channel_id=channel_id, guild_id=guild_id, owner_id=user_id)
+            initiative_repo.save_tracker(DND_DB_PATH, tracker)
+            await interaction.response.send_message(f"Started initiative in <#{channel_id}>.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd ini start channel=%s owner=%s", channel_id, user_id)
+        elif action == "add":
+            target_id = int(member) if member and member.isdigit() else user_id
+            tracker = initiative_repo.load_tracker(DND_DB_PATH, channel_id)
+            if not tracker:
+                tracker = InitiativeTracker(channel_id=channel_id, guild_id=guild_id, owner_id=user_id)
+            if tracker.owner_id != user_id:
+                DEBUG_LOGGER.debug("REJECT /dnd ini add not owner channel=%s actor=%s owner=%s", channel_id, user_id, tracker.owner_id)
+                await interaction.response.send_message("Only the initiative owner can modify this tracker.", ephemeral=True)
+                return
+            edition = _edition_for_guild(interaction)
+            stat = "wits" if edition.startswith("20th") else "dexterity"
+            fields = _resolve_default_character_fields(DND_DB_PATH, guild_id, user_id)
+            dex_wits = _resolve_attribute_for_sheet(edition, stat, fields) or 0
+            display_name = _member_default_character(DND_DB_PATH, guild_id, target_id) or str(target_id)
+            char = InitiativeCharacter(member_id=target_id, display_name=display_name, dex_wits=max(0, dex_wits))
+            tracker.characters.append(char)
+            initiative_repo.save_tracker(DND_DB_PATH, tracker)
+            await interaction.response.send_message(f"Added initiative entry for `{display_name}` with {stat}={max(0, dex_wits)}.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd ini add channel=%s member=%s stat=%s value=%s", channel_id, target_id, stat, max(0, dex_wits))
+        elif action == "roll":
+            tracker = initiative_repo.load_tracker(DND_DB_PATH, channel_id)
+            if not tracker:
+                await interaction.response.send_message("No initiative here. Use `/dnd ini start`.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd ini roll missing tracker channel=%s", channel_id)
+                return
+            if tracker.owner_id != user_id:
+                DEBUG_LOGGER.debug("REJECT /dnd ini roll not owner channel=%s actor=%s owner=%s", channel_id, user_id, tracker.owner_id)
+                await interaction.response.send_message("Only the initiative owner can roll here.", ephemeral=True)
+                return
+            for c in tracker.characters:
+                c.compute()
+            tracker.phase = "status"
+            initiative_repo.save_tracker(DND_DB_PATH, tracker)
+            ordered = tracker.ordered()
+            lines = [f"Initiative (`{_edition_label(_edition_for_guild(interaction))}`):"] + [f"- {c.display_name}: {c.total}" for c in ordered]
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd ini roll channel=%s count=%s", channel_id, len(tracker.characters))
+        elif action == "status":
+            tracker = initiative_repo.load_tracker(DND_DB_PATH, channel_id)
+            if not tracker:
+                await interaction.response.send_message("No initiative tracker here.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd ini status missing channel=%s", channel_id)
+                return
+            ordered = tracker.ordered()
+            lines = [f"Initiative status (`{_edition_label(_edition_for_guild(interaction))}`):"] + [f"- {c.display_name}: {c.total}" for c in ordered]
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd ini status channel=%s count=%s", channel_id, len(ordered))
+        elif action == "clear":
+            tracker = initiative_repo.load_tracker(DND_DB_PATH, channel_id)
+            if not tracker or tracker.owner_id != user_id:
+                DEBUG_LOGGER.debug("REJECT /dnd ini clear not owner channel=%s actor=%s", channel_id, user_id)
+                await interaction.response.send_message("Only the initiative owner can clear this tracker.", ephemeral=True)
+                return
+            initiative_repo.save_tracker(DND_DB_PATH, InitiativeTracker(channel_id=channel_id, guild_id=guild_id, owner_id=user_id))
+            await interaction.response.send_message("Cleared initiative tracker.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd ini clear channel=%s", channel_id)
         else:
-            await webhook.send(text, username=proxy["name"], avatar_url=avatar)
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, "Proxy message sent.")
-    elif action == "list":
-        proxies = list_proxies(DND_DB_PATH, guild_id, owner_id)
-        if not proxies:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "No proxies.")
-            return
-        lines = [f"- {p['name']}" for p in proxies]
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, "\n".join(lines))
-        else:
-            await interaction.response.send_message("\n".join(lines))
-    elif action == "delete":
-        deleted = delete_proxy(DND_DB_PATH, guild_id, owner_id, str(name).strip())
-        if not deleted:
-            if reply_ephemeral:
-                await reply_ephemeral(interaction, "Proxy not found.")
-            return
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, "Proxy deleted.")
-    else:
-        if reply_ephemeral:
-            await reply_ephemeral(interaction, "Use `create`, `send`, `list`, or `delete`.")
+            DEBUG_LOGGER.debug("REJECT /dnd ini bad action=%s", action)
+            await interaction.response.send_message("Use `start`, `add`, `roll`, `status`, or `clear`.", ephemeral=True)

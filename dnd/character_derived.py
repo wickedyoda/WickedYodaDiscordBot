@@ -1,0 +1,191 @@
+from __future__ import annotations
+
+from typing import Any
+
+_STATS_5E = ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]
+_STATS_20TH = [
+    "strength",
+    "dexterity",
+    "stamina",
+    "charisma",
+    "manipulation",
+    "appearance",
+    "perception",
+    "intelligence",
+    "wits",
+]
+
+
+def _modifier(score: int | float | None) -> int:
+    try:
+        value = int(score or 0)
+    except Exception:
+        return 0
+    return (value - 10) // 2
+
+
+def _label(key: str) -> str:
+    return {
+        "strength": "STR",
+        "dexterity": "DEX",
+        "constitution": "CON",
+        "intelligence": "INT",
+        "wisdom": "WIS",
+        "charisma": "CHA",
+        "stamina": "STA",
+        "manipulation": "MAN",
+        "appearance": "APP",
+        "perception": "PER",
+        "wits": "WIT",
+    }.get(key, key.upper())
+
+
+def edition_stats(edition: str) -> list[str]:
+    edition = (edition or "").strip().lower()
+    if edition.startswith("20th"):
+        return list(_STATS_20TH)
+    return list(_STATS_5E)
+
+
+def build_derived(edition: str, fields: dict[str, Any]) -> dict[str, Any]:
+    edition = (edition or "").strip().lower()
+    stats_key = edition_stats(edition)
+    score_map = {stat: _to_int(fields.get(stat)) for stat in stats_key}
+    mods = {f"{stat}_mod": _modifier(score_map.get(stat)) for stat in stats_key}
+    derived: dict[str, Any] = {"stats": stats_key, "scores": score_map, "modifiers": mods}
+
+    if edition.startswith("20th") or edition.startswith("custom"):
+        derived.update(
+            {
+                "willpower": _to_int(fields.get("willpower")),
+                "health": _to_int(fields.get("health")),
+                "aggravated": _to_int(fields.get("aggravated")),
+            }
+        )
+        return derived
+
+    dex_mod = mods.get("dexterity_mod", 0)
+    ac_base = _to_int(fields.get("ac_base"))
+    ac = max(10 + dex_mod, ac_base if ac_base else 10 + dex_mod)
+    con_mod = mods.get("constitution_mod", 0)
+    level = _to_int(fields.get("level"))
+    hit_die = _to_int(fields.get("hit_die") or fields.get("hit_dice") or 8)
+    max_hp = _to_int(fields.get("max_hp") or (hit_die + con_mod * level))
+    proficiency = 2 + max(0, level - 1) // 4
+    speed = _to_int(fields.get("speed") or 30)
+    passive = 10 + _to_int(fields.get("passive_perception") or 0)
+    skills = _clean_list(fields.get("skills"))
+    equipment = _clean_list(fields.get("equipment"))
+    weapons = _clean_list(fields.get("weapons"))
+    cantrips = _clean_list(fields.get("cantrips"))
+    spells = _clean_list(fields.get("spells"))
+    spell_slots = _to_int(fields.get("spell_slots"))
+    armor_name = fields.get("armor") or ""
+    shield_name = fields.get("shield") or ""
+    ac_override = _to_int(fields.get("ac"))
+    final_ac = ac_override if ac_override else ac
+    cover = _to_int(fields.get("ac_cover") or 0)
+    final_ac = final_ac + cover
+    derived.update(
+        {
+            "ac": final_ac,
+            "max_hp": max_hp,
+            "current_hp": _to_int(fields.get("current_hp") or max_hp),
+            "hit_die": hit_die,
+            "level": level,
+            "proficiency": proficiency,
+            "speed": speed,
+            "passive_perception": passive,
+            "armor": armor_name,
+            "shield": shield_name,
+            "weapons": weapons,
+            "skills": skills,
+            "equipment": equipment,
+            "cantrips": cantrips,
+            "spells": spells,
+            "spell_slots": spell_slots,
+        }
+    )
+    return derived
+
+
+def render_derived(edition: str, derived: dict[str, Any]) -> str:
+    edition = (edition or "").strip().lower()
+    lines = ["**Derived Stats**"]
+    if edition.startswith("20th") or edition.startswith("custom"):
+        labels = {
+            "willpower": "Willpower",
+            "health": "Health",
+            "aggravated": "Aggravated",
+        }
+        for key in ["willpower", "health", "aggravated"]:
+            lines.append(f"{labels[key]}: {derived.get(key, 0)}")
+        return "\n".join(lines)
+
+    lines.append(f"AC: {derived.get('ac', 10)}")
+    lines.append(f"HP: {derived.get('current_hp', 0)}/{derived.get('max_hp', 0)}")
+    lines.append(f"Proficiency: +{derived.get('proficiency', 2)}")
+    lines.append(f"Speed: {derived.get('speed', 30)} ft")
+    if derived.get("armor"):
+        lines.append(f"Armor: {derived['armor']}")
+    if derived.get("shield"):
+        lines.append(f"Shield: {derived['shield']}")
+    weapons = derived.get("weapons") or []
+    if weapons:
+        lines.append("Weapons: " + ", ".join(weapons))
+    skills = derived.get("skills") or []
+    if skills:
+        lines.append("Skills: " + ", ".join(skills))
+    equipment = derived.get("equipment") or []
+    if equipment:
+        lines.append("Equipment: " + ", ".join(equipment))
+    cantrips = derived.get("cantrips") or []
+    if cantrips:
+        lines.append("Cantrips: " + ", ".join(cantrips))
+    spells = derived.get("spells") or []
+    if spells:
+        lines.append("Spells: " + ", ".join(spells))
+    spell_slots = derived.get("spell_slots")
+    if spell_slots:
+        lines.append(f"Spell Slots: {spell_slots}")
+    return "\n".join(lines)
+
+
+def render_ability_block(edition: str, derived: dict[str, Any]) -> str:
+    edition = (edition or "").strip().lower()
+    stats = derived.get("stats") or edition_stats(edition)
+    scores = derived.get("scores") or {}
+    mods = derived.get("modifiers") or {}
+    lines = ["**Abilities**"]
+    for stat in stats:
+        score = scores.get(stat, 0)
+        mod = mods.get(f"{stat}_mod", _modifier(score))
+        lines.append(f"{_label(stat)}: {score} ({mod:+})")
+    return "\n".join(lines)
+
+
+def _to_int(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    text = str(value).strip()
+    if not text:
+        return 0
+    try:
+        return int(text)
+    except Exception:
+        return 0
+
+
+def _clean_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value)
+    if not text:
+        return []
+    if "," in text:
+        return [part.strip() for part in text.split(",") if part.strip()]
+    return [part.strip() for part in text.splitlines() if part.strip()]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from functools import lru_cache
 
 _DND_CHAR_TABLE = """
 CREATE TABLE IF NOT EXISTS dnd_characters (
@@ -17,6 +18,7 @@ CREATE TABLE IF NOT EXISTS dnd_characters (
 """
 
 
+@lru_cache(maxsize=8)
 def _get_conn(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, timeout=10)
     conn.execute("PRAGMA journal_mode = WAL")
@@ -24,6 +26,10 @@ def _get_conn(db_path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout = 5000")
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _clear_conn_cache() -> None:
+    _get_conn.cache_clear()
 
 
 def ensure_schema(db_path: str) -> None:
@@ -48,7 +54,7 @@ def delete_character(db_path: str, guild_id: int, owner_id: int, name: str) -> b
         return cur.rowcount > 0
 
 
-def find_character(db_path: str, guild_id: int, owner_id: int, name: str) -> dict | None:
+def find_character(db_path: str, guild_id: int, owner_id: int, name: str, need_data: bool = True) -> dict | None:
     with _get_conn(db_path) as conn:
         row = conn.execute(
             "SELECT id, guild_id, owner_id, splat, name, json, updated_at FROM dnd_characters WHERE guild_id=? AND owner_id=? AND name=?",
@@ -56,15 +62,17 @@ def find_character(db_path: str, guild_id: int, owner_id: int, name: str) -> dic
         ).fetchone()
         if not row:
             return None
-        return {
+        record = {
             "id": row["id"],
             "guild_id": row["guild_id"],
             "owner_id": row["owner_id"],
             "splat": row["splat"],
             "name": row["name"],
-            "data": json.loads(row["json"]),
             "updated_at": row["updated_at"],
         }
+        if need_data:
+            record["data"] = json.loads(row["json"])
+        return record
 
 
 def list_characters(db_path: str, guild_id: int, owner_id: int) -> list[dict]:
