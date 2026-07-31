@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from discord import app_commands
 
 from dnd import chronicle_service
+from dnd import character_builder
 from dnd import editions
 from dnd.chronicle_service import add_xp, create_reward_rule, evaluate_rewards, get_chronicle, list_xp_entries, update_chronicle, upsert_member, upsert_reward_tier
 
@@ -280,7 +281,12 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 )
                 return
             upsert_member(DND_DB_PATH, guild_id, user_id, name=name)
-            await interaction.response.send_message(f"Created character `{name}` for `{splat_key}`.", ephemeral=True)
+            template = character_builder.sheet_template(splat_key)
+            lines = [
+                f"Created character `{name}` for `{splat_key}`.",
+                "Template fields: " + ", ".join(template.keys()),
+            ]
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
         elif action == "show":
             members = chronicle_service.list_members(DND_DB_PATH, guild_id)
             member = next((m for m in members if m.get("user_id") == user_id), None)
