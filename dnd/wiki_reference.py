@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Dict, List
-
 WIKI_REFERENCE_URL = "https://share.google/aEG5ltpsiHwTaw2Zc"
 WIKI_SUMMARY = (
     "Dungeons & Dragons is a fantasy tabletop role-playing game (TTRPG) originally created and designed by "
@@ -10,7 +8,7 @@ WIKI_SUMMARY = (
 )
 
 ROOT_PAGE = "Dungeons & Dragons"
-LEVEL2_PAGES: List[str] = [
+LEVEL2_PAGES: list[str] = [
     "Editions of Dungeons & Dragons",
     "Dungeons & Dragons 5th edition",
     "Dungeons & Dragons 4th edition",
@@ -29,7 +27,7 @@ LEVEL2_PAGES: List[str] = [
     "Orc",
 ]
 
-LEVEL3_PAGES: List[str] = [
+LEVEL3_PAGES: list[str] = [
     "Dungeons & Dragons 5th edition",
     "2024 revision of 5th Edition",
     "Dungeons & Dragons 4th edition",
@@ -44,13 +42,13 @@ LEVEL3_PAGES: List[str] = [
     "Player's Handbook",
 ]
 
-LEVEL2_FALLBACK: Dict[str, str] = {
+LEVEL2_FALLBACK: dict[str, str] = {
     "Player's Handbook": "Core player rulebook for creating and advancing characters.",
     "Dungeon Master's Guide": "Rules for running campaigns and adjudicating play.",
     "Monster Manual": "Core bestiary for creatures and adversaries.",
 }
 
-LEVEL3_FALLBACK: Dict[str, str] = {
+LEVEL3_FALLBACK: dict[str, str] = {
     "Dungeons & Dragons 5th edition": "Current edition focusing on streamlined, accessible play.",
     "Dungeons & Dragons 4th edition": "Edition with defined roles and tactical combat.",
     "Advanced Dungeons & Dragons 2nd edition": "Classic edition with detailed campaign settings.",

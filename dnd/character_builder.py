@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
-_CHARACTER_FIELDS: Dict[str, List[str]] = {
+_CHARACTER_FIELDS: dict[str, list[str]] = {
     "vampire20th": [
         "name",
         "splat",
@@ -346,9 +346,9 @@ EDITION_DEFAULTS = {
 }
 
 
-def fields_for(splat: str) -> List[str]:
+def fields_for(splat: str) -> list[str]:
     return list(_CHARACTER_FIELDS.get(splat, ["name", "splat", "concept"]))
 
 
-def sheet_template(splat: str) -> Dict[str, Any]:
+def sheet_template(splat: str) -> dict[str, Any]:
     return {field: "" for field in fields_for(splat)}

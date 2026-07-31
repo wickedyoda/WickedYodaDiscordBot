@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from dnd import editions
-from dnd.roll_20th import roll_pool as roll_20th_pool
 from dnd.roll_5th import build_sheet_pool, roll_sheet_pool
+from dnd.roll_20th import roll_pool as roll_20th_pool
 
 
 class RollError(Exception):

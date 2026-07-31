@@ -4869,6 +4869,78 @@ def create_app(
     def discourse():
         return _render_page("discourse", "Discourse")
 
+    @app.get("/admin/dnd")
+    @login_required
+    def dnd_home():
+        if not _current_user_is_dnd() and not _current_user_is_admin():
+            flash("DND role access required.", "warning")
+            return redirect(url_for("dashboard"))
+        return _render_page("dnd", "D&D")
+
+    @app.get("/admin/dnd/editions")
+    @login_required
+    def dnd_editions():
+        if not _current_user_is_dnd() and not _current_user_is_admin():
+            flash("DND role access required.", "warning")
+            return redirect(url_for("dashboard"))
+        return _render_page("dnd_editions", "D&D Editions")
+
+    @app.get("/admin/dnd/characters")
+    @login_required
+    def dnd_characters():
+        if not _current_user_is_dnd() and not _current_user_is_admin():
+            flash("DND role access required.", "warning")
+            return redirect(url_for("dashboard"))
+        return _render_page("dnd_characters", "D&D Characters")
+
+    @app.get("/admin/dnd/rolls")
+    @login_required
+    def dnd_rolls():
+        if not _current_user_is_dnd() and not _current_user_is_admin():
+            flash("DND role access required.", "warning")
+            return redirect(url_for("dashboard"))
+        return _render_page("dnd_rolls", "D&D Rolls")
+
+    @app.get("/admin/dnd/proxies")
+    @login_required
+    def dnd_proxies():
+        if not _current_user_is_dnd() and not _current_user_is_admin():
+            flash("DND role access required.", "warning")
+            return redirect(url_for("dashboard"))
+        return _render_page("dnd_proxies", "D&D Proxies")
+
+    @app.get("/admin/dnd/chronicles")
+    @login_required
+    def dnd_chronicles():
+        if not _current_user_is_dnd() and not _current_user_is_admin():
+            flash("DND role access required.", "warning")
+            return redirect(url_for("dashboard"))
+        return _render_page("dnd_chronicles", "D&D Chronicles")
+
+    @app.get("/admin/dnd/wiki")
+    @login_required
+    def dnd_wiki():
+        if not _current_user_is_dnd() and not _current_user_is_admin():
+            flash("DND role access required.", "warning")
+            return redirect(url_for("dashboard"))
+        return _render_page("dnd_wiki", "D&D Wiki")
+
+    @app.get("/admin/dnd/setup")
+    @login_required
+    def dnd_setup():
+        if not _current_user_is_admin():
+            flash("Admin access required.", "warning")
+            return redirect(url_for("dashboard"))
+        return _render_page("dnd_setup", "D&D Setup")
+
+    @app.get("/admin/dnd/setup/status")
+    @login_required
+    def dnd_setup_status():
+        if not _current_user_is_admin():
+            flash("Admin access required.", "warning")
+            return redirect(url_for("dashboard"))
+        return _render_page("dnd_setup_status", "D&D Setup Status")
+
     @app.get("/admin/settings")
     @login_required
     def settings():

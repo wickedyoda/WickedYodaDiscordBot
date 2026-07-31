@@ -2,22 +2,25 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-import discord
 from discord import app_commands
 
-from dnd import chronicle_service
-from dnd import character_builder
-from dnd import editions
-from dnd import proxy_group_service
-from dnd import proxy_service
+from dnd import character_builder, chronicle_service, editions, proxy_group_service, proxy_service
 from dnd import characters as character_service
-from dnd.chronicle_service import add_xp, create_reward_rule, evaluate_rewards, get_chronicle, list_xp_entries, update_chronicle, upsert_member, upsert_reward_tier
-from dnd.roll_router import route_roll, RollError
+from dnd.character_derived import _to_int, build_derived, render_ability_block, render_derived
+from dnd.chronicle_schema import _get_conn
+from dnd.chronicle_service import (
+    add_xp,
+    create_reward_rule,
+    evaluate_rewards,
+    update_chronicle,
+    upsert_member,
+    upsert_reward_tier,
+)
 from dnd.debug_logger import get_logger, log_command
-from dnd.character_derived import build_derived, render_ability_block, render_derived
 from dnd.editions import _edition_for_splat
+from dnd.roll_router import RollError, route_roll
 
 DND_DB_PATH = "/app/data/dnd.db"
 DEBUG_LOGGER = get_logger("wickedyoda.dnd")
@@ -29,7 +32,7 @@ EDITION_CHOICES = [
 ]
 
 
-def _edition_defaults(edition: str) -> List[str]:
+def _edition_defaults(edition: str) -> list[str]:
     edition = (edition or "").strip().lower()
     info = editions.get_edition(edition)
     if info:
@@ -67,7 +70,7 @@ def _member_default_character(db_path: str, guild_id: int, user_id: int) -> str 
     return None
 
 
-def _resolve_default_character_fields(db_path: str, guild_id: int, user_id: int) -> Dict[str, Any]:
+def _resolve_default_character_fields(db_path: str, guild_id: int, user_id: int) -> dict[str, Any]:
     member_name = _member_default_character(db_path, guild_id, user_id)
     if not member_name:
         return {}
@@ -81,7 +84,7 @@ def _resolve_default_character_fields(db_path: str, guild_id: int, user_id: int)
     return payload.get("fields") or {}
 
 
-def _resolve_attribute_for_sheet(edition: str, attribute: str | None, fields: Dict[str, Any]) -> int:
+def _resolve_attribute_for_sheet(edition: str, attribute: str | None, fields: dict[str, Any]) -> int:
     if not attribute or not fields:
         return 0
     attr = attribute.strip().lower()
@@ -112,7 +115,7 @@ def _resolve_attribute_for_sheet(edition: str, attribute: str | None, fields: Di
     return _to_int(fields.get(stat_key))
 
 
-def _resolve_skill_for_sheet(skill: str | None, fields: Dict[str, Any]) -> int:
+def _resolve_skill_for_sheet(skill: str | None, fields: dict[str, Any]) -> int:
     if not skill or not fields:
         return 0
     key = skill.strip().lower()
@@ -123,23 +126,23 @@ def _resolve_skill_for_sheet(skill: str | None, fields: Dict[str, Any]) -> int:
     return 2 if key in candidates else 0
 
 
-def _active_character_initiative_stat(edition: str, fields: Dict[str, Any]) -> int:
+def _active_character_initiative_stat(edition: str, fields: dict[str, Any]) -> int:
     edition_key = (edition or "").strip().lower()
     if edition_key.startswith("20th"):
         return _resolve_attribute_for_sheet(edition, "wits", fields)
     return _resolve_attribute_for_sheet(edition, "dexterity", fields)
 
 def ensure_dnd_schema() -> None:
-    from dnd.chronicle_schema import ensure_schema as ensure_chronicle_schema
     from dnd.characters import ensure_schema as ensure_character_schema
+    from dnd.chronicle_schema import ensure_schema as ensure_chronicle_schema
     from dnd.initiative_repo import ensure_schema as ensure_init_schema
     ensure_chronicle_schema(DND_DB_PATH)
     ensure_character_schema(DND_DB_PATH)
     ensure_init_schema(DND_DB_PATH)
 
 
-def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) -> None:
-    bound: Dict[str, Any] = {
+def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> None:
+    bound: dict[str, Any] = {
         "reply_ephemeral": None,
         "log_interaction": None,
         "ensure_interaction_command_access": None,
@@ -148,7 +151,6 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         bound.update(helpers)
     reply_ephemeral = bound["reply_ephemeral"]
     log_interaction = bound["log_interaction"]
-    ensure_interaction_command_access = bound["ensure_interaction_command_access"]
 
     async def _log(interaction: Any, action: str, reason: str = "", *, success: bool = True) -> None:
         if log_interaction is None:
@@ -174,7 +176,7 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             return True
         return False
 
-    def _allowed_splats_for_guild(interaction: Any) -> List[str]:
+    def _allowed_splats_for_guild(interaction: Any) -> list[str]:
         if not getattr(interaction, "guild", None):
             return []
         data = chronicle_service.get_chronicle(DND_DB_PATH, int(interaction.guild.id))
@@ -198,10 +200,9 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             return False
         return splat in allowed
 
-    def _edition_choices(interaction: Any) -> List[app_commands.Choice]:
-        edition = _edition_for_guild(interaction)
+    def _edition_choices(interaction: Any) -> list[app_commands.Choice]:
         allowed = _allowed_splats_for_guild(interaction)
-        out: List[app_commands.Choice] = []
+        out: list[app_commands.Choice] = []
         for name in allowed[:25]:
             label = editions.splat_label(name)
             out.append(app_commands.Choice(name=label or name, value=name))
@@ -271,7 +272,7 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         await _log(interaction, "dnd_roll", f"system={system} pool={pool} diff={difficulty}", success=True)
 
     @roll.autocomplete("system")
-    async def roll_system_autocomplete(interaction: Any, current: str) -> List[app_commands.Choice]:
+    async def roll_system_autocomplete(interaction: Any, current: str) -> list[app_commands.Choice]:
         edition = _edition_for_guild(interaction)
         edition_info = editions.get_edition(edition)
         allowed = edition_info.roll_systems if edition_info else []
@@ -350,7 +351,7 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         await _log(interaction, "dnd_sheet", f"attribute={attribute} skill={skill} splat={splat}", success=True)
 
     @sheet.autocomplete("splat")
-    async def sheet_splat_autocomplete(interaction: Any, current: str) -> List[app_commands.Choice]:
+    async def sheet_splat_autocomplete(interaction: Any, current: str) -> list[app_commands.Choice]:
         allowed = _edition_choices(interaction)
         out = []
         for choice in allowed:
@@ -682,7 +683,6 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             return
         guild_id = int(interaction.guild.id)
         user_id = int(interaction.user.id)
-        from dnd import proxy_group_service
         if action == "create":
             if not name:
                 await interaction.response.send_message("Provide group name.", ephemeral=True)
@@ -742,7 +742,6 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             return
         guild_id = int(interaction.guild.id)
         user_id = int(interaction.user.id)
-        from dnd import proxy_group_service
         if action == "create":
             if not group or not proxy or not target_channel:
                 await interaction.response.send_message("Provide group, proxy, and target_channel.", ephemeral=True)
@@ -801,7 +800,7 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         user_id = int(interaction.user.id)
         channel_id = int(interaction.channel.id)
         from dnd import initiative_repo
-        from dnd.initiative import InitiativeTracker, InitiativeCharacter
+        from dnd.initiative import InitiativeCharacter, InitiativeTracker
         if action == "start":
             tracker = InitiativeTracker(channel_id=channel_id, guild_id=guild_id, owner_id=user_id)
             initiative_repo.save_tracker(DND_DB_PATH, tracker)

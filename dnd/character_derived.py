@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 _STATS_5E = ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]
 _STATS_20TH = [
@@ -47,12 +47,12 @@ def edition_stats(edition: str) -> list[str]:
     return list(_STATS_5E)
 
 
-def build_derived(edition: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+def build_derived(edition: str, fields: dict[str, Any]) -> dict[str, Any]:
     edition = (edition or "").strip().lower()
     stats_key = edition_stats(edition)
     score_map = {stat: _to_int(fields.get(stat)) for stat in stats_key}
     mods = {f"{stat}_mod": _modifier(score_map.get(stat)) for stat in stats_key}
-    derived: Dict[str, Any] = {"stats": stats_key, "scores": score_map, "modifiers": mods}
+    derived: dict[str, Any] = {"stats": stats_key, "scores": score_map, "modifiers": mods}
 
     if edition.startswith("20th") or edition.startswith("custom"):
         derived.update(
@@ -109,7 +109,7 @@ def build_derived(edition: str, fields: Dict[str, Any]) -> Dict[str, Any]:
     return derived
 
 
-def render_derived(edition: str, derived: Dict[str, Any]) -> str:
+def render_derived(edition: str, derived: dict[str, Any]) -> str:
     edition = (edition or "").strip().lower()
     lines = ["**Derived Stats**"]
     if edition.startswith("20th") or edition.startswith("custom"):
@@ -151,7 +151,7 @@ def render_derived(edition: str, derived: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def render_ability_block(edition: str, derived: Dict[str, Any]) -> str:
+def render_ability_block(edition: str, derived: dict[str, Any]) -> str:
     edition = (edition or "").strip().lower()
     stats = derived.get("stats") or edition_stats(edition)
     scores = derived.get("scores") or {}

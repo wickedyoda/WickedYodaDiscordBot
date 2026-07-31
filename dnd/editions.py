@@ -2,45 +2,38 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Dict, List, Optional
-
-from dnd.wiki_reference import WIKI_REFERENCE_URL, WIKI_SUMMARY
 
 
 @dataclass
 class EditionInfo:
     key: str
     label: str
-    default_splats: List[str]
+    default_splats: list[str]
     description: str
-    roll_systems: List[str]
+    roll_systems: list[str]
     character_sheet_supported: bool
     sheet_roll_supported: bool = False
     proxy_supported: bool = True
     xp_supported: bool = True
     reward_supported: bool = True
-    splat_metadata: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    splat_metadata: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
-WIKI_REFERENCE_URL = "https://share.google/aEG5ltpsiHwTaw2Zc"
-WIKI_SUMMARY = "Dungeons & Dragons is a fantasy tabletop role-playing game (TTRPG) originally created and designed by Gary Gygax and Dave Arneson. First published in 1974 by TSR; published by Wizards of the Coast since 1997. Derived from miniature wargames and Chainmail (1971). Recognized as the beginning of modern role-playing games."
-
-
-_EDITIONS: Dict[str, EditionInfo] = {}
+_EDITIONS: dict[str, EditionInfo] = {}
 
 
 def _register(
     key: str,
     label: str,
-    default_splats: List[str],
+    default_splats: list[str],
     description: str,
-    roll_systems: List[str],
+    roll_systems: list[str],
     character_sheet_supported: bool,
     sheet_roll_supported: bool = False,
     proxy_supported: bool = True,
     xp_supported: bool = True,
     reward_supported: bool = True,
-    splat_metadata: Optional[Dict[str, Dict[str, str]]] = None,
+    splat_metadata: dict[str, dict[str, str]] | None = None,
 ) -> None:
     info = EditionInfo(
         key=key,
@@ -151,11 +144,11 @@ EDITION_CHOICES = [
 ]
 
 
-def get_edition(key: str) -> Optional[EditionInfo]:
+def get_edition(key: str) -> EditionInfo | None:
     return _EDITIONS.get((key or "").strip().lower())
 
 
-def all_editions() -> List[EditionInfo]:
+def all_editions() -> list[EditionInfo]:
     return list(_EDITIONS.values())
 
 
@@ -198,7 +191,7 @@ def _edition_label(edition: str) -> str:
     return info.label if info else edition
 
 
-def _edition_for_splat(splat: str) -> Optional[EditionInfo]:
+def _edition_for_splat(splat: str) -> EditionInfo | None:
     for edition in _EDITIONS.values():
         if splat in edition.default_splats:
             return edition
@@ -206,6 +199,6 @@ def _edition_for_splat(splat: str) -> Optional[EditionInfo]:
 
 
 @lru_cache(maxsize=256)
-def _cached_edition_for_splat(splat: str) -> Optional[str]:
+def _cached_edition_for_splat(splat: str) -> str | None:
     edition = _edition_for_splat(splat)
     return edition.key if edition else None

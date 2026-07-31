@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from dnd.chronicle_schema import _get_conn
 
@@ -10,7 +10,7 @@ def _utc_now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
-def create_proxy_group(db_path: str, guild_id: int, owner_id: int, name: str, description: str = "") -> Dict[str, Any]:
+def create_proxy_group(db_path: str, guild_id: int, owner_id: int, name: str, description: str = "") -> dict[str, Any]:
     guild_id = int(guild_id)
     owner_id = int(owner_id)
     with _get_conn(db_path) as conn:
@@ -29,7 +29,7 @@ def create_proxy_group(db_path: str, guild_id: int, owner_id: int, name: str, de
     return dict(row) if row else {}
 
 
-def list_proxy_groups(db_path: str, guild_id: int, owner_id: int) -> List[Dict[str, Any]]:
+def list_proxy_groups(db_path: str, guild_id: int, owner_id: int) -> list[dict[str, Any]]:
     guild_id = int(guild_id)
     owner_id = int(owner_id)
     rows = (
@@ -40,7 +40,7 @@ def list_proxy_groups(db_path: str, guild_id: int, owner_id: int) -> List[Dict[s
     return [dict(r) for r in rows]
 
 
-def add_proxy_to_group(db_path: str, guild_id: int, owner_id: int, group_name: str, proxy_name: str) -> Dict[str, Any]:
+def add_proxy_to_group(db_path: str, guild_id: int, owner_id: int, group_name: str, proxy_name: str) -> dict[str, Any]:
     with _get_conn(db_path) as conn:
         row = conn.execute(
             "SELECT id FROM dnd_proxies WHERE guild_id=? AND owner_id=? AND name=?",
@@ -77,7 +77,7 @@ def remove_proxy_from_group(db_path: str, guild_id: int, owner_id: int, group_na
         return cur.rowcount > 0
 
 
-def list_group_proxies(db_path: str, guild_id: int, owner_id: int, group_name: str) -> List[Dict[str, Any]]:
+def list_group_proxies(db_path: str, guild_id: int, owner_id: int, group_name: str) -> list[dict[str, Any]]:
     rows = (
         _get_conn(db_path)
         .execute(
@@ -90,7 +90,7 @@ def list_group_proxies(db_path: str, guild_id: int, owner_id: int, group_name: s
     return [dict(r) for r in rows]
 
 
-def record_reproxy(db_path: str, guild_id: int, target_channel_id: int, owner_id: int, group_name: str, proxy_id: int, source_message_id: str = "", content: str = "") -> Dict[str, Any]:
+def record_reproxy(db_path: str, guild_id: int, target_channel_id: int, owner_id: int, group_name: str, proxy_id: int, source_message_id: str = "", content: str = "") -> dict[str, Any]:
     with _get_conn(db_path) as conn:
         now = _utc_now()
         conn.execute(
@@ -110,7 +110,7 @@ def record_reproxy(db_path: str, guild_id: int, target_channel_id: int, owner_id
     }
 
 
-def list_reproxy_jobs(db_path: str, guild_id: int, owner_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+def list_reproxy_jobs(db_path: str, guild_id: int, owner_id: int, limit: int = 50) -> list[dict[str, Any]]:
     rows = (
         _get_conn(db_path)
         .execute(
