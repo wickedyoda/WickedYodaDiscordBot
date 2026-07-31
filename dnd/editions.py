@@ -19,6 +19,10 @@ class EditionInfo:
     splat_metadata: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
 
+WIKI_REFERENCE_URL = "https://share.google/aEG5ltpsiHwTaw2Zc"
+WIKI_SUMMARY = "Dungeons & Dragons is a fantasy tabletop role-playing game (TTRPG) originally created and designed by Gary Gygax and Dave Arneson. First published in 1974 by TSR; published by Wizards of the Coast since 1997. Derived from miniature wargames and Chainmail (1971). Recognized as the beginning of modern role-playing games."
+
+
 _EDITIONS: Dict[str, EditionInfo] = {}
 
 
