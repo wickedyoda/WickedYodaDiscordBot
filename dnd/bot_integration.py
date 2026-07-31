@@ -138,6 +138,17 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             return
         await _log(interaction, "dnd_roll", f"system={system} pool={pool} diff={difficulty}", success=True)
 
+    @roll.autocomplete("system")
+    async def roll_system_autocomplete(interaction: Any, current: str) -> List[app_commands.Choice]:
+        edition = _edition_for_guild(interaction)
+        edition_info = editions.get_edition(edition)
+        allowed = edition_info.roll_systems if edition_info else []
+        out = []
+        for item in allowed:
+            if current.lower() in item.lower():
+                out.append(app_commands.Choice(name=item, value=item))
+        return out[:25]
+
     @dnd.command(name="sheet", description="Roll a 5th edition sheet pool.")
     async def sheet(
         interaction: Any,
@@ -184,6 +195,15 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 ephemeral=True,
             )
         await _log(interaction, "dnd_sheet", f"attribute={attribute} skill={skill} splat={splat}", success=True)
+
+    @sheet.autocomplete("splat")
+    async def sheet_splat_autocomplete(interaction: Any, current: str) -> List[app_commands.Choice]:
+        allowed = _edition_choices(interaction)
+        out = []
+        for choice in allowed:
+            if current.lower() in choice.value.lower() or current.lower() in choice.name.lower():
+                out.append(choice)
+        return out[:25]
 
     @dnd.command(name="setup", description="Edition-aware D&D setup helpers.")
     async def setup(interaction: Any, action: str = "show") -> None:  # type: ignore[misc]
