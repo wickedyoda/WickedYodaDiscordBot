@@ -662,3 +662,81 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         else:
             DEBUG_LOGGER.debug("REJECT /dnd reproxy bad action=%s", action)
             await interaction.response.send_message("Use `create` or `list`.", ephemeral=True)
+
+    @dnd.command(name="ini", description="Edition-aware initiative tracker.")
+    async def ini(interaction: Any, action: str = "status", member: str = "") -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug("ENTER /dnd ini action=%s channel=%s", action, getattr(getattr(interaction, "channel", None), "id", "unknown"))
+        if await _enforce_setup(interaction):
+            DEBUG_LOGGER.debug("BLOCKED /dnd ini setup not complete")
+            return
+        if not interaction.guild:
+            DEBUG_LOGGER.debug("REJECT /dnd ini dm_context")
+            await interaction.response.send_message("Use in a server.", ephemeral=True)
+            return
+        guild_id = int(interaction.guild.id)
+        user_id = int(interaction.user.id)
+        channel_id = int(interaction.channel.id)
+        from dnd import initiative_repo
+        from dnd.initiative import InitiativeTracker, InitiativeCharacter
+        if action == "start":
+            tracker = InitiativeTracker(channel_id=channel_id, guild_id=guild_id, owner_id=user_id)
+            initiative_repo.save_tracker(DND_DB_PATH, tracker)
+            await interaction.response.send_message(f"Started initiative in <#{channel_id}>.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd ini start channel=%s owner=%s", channel_id, user_id)
+        elif action == "add":
+            target_id = int(member) if member and member.isdigit() else user_id
+            tracker = initiative_repo.load_tracker(DND_DB_PATH, channel_id)
+            if not tracker:
+                tracker = InitiativeTracker(channel_id=channel_id, guild_id=guild_id, owner_id=user_id)
+            if tracker.owner_id != user_id:
+                DEBUG_LOGGER.debug("REJECT /dnd ini add not owner channel=%s actor=%s owner=%s", channel_id, user_id, tracker.owner_id)
+                await interaction.response.send_message("Only the initiative owner can modify this tracker.", ephemeral=True)
+                return
+            edition = _edition_for_guild(interaction)
+            stat = "wits" if edition.startswith("20th") else "dexterity"
+            # Use a stable member_id/author fallback; actual field lookup is ed/sheet-dependent
+            char = InitiativeCharacter(member_id=target_id, display_name=str(target_id), dex_wits=3)
+            tracker.characters.append(char)
+            initiative_repo.save_tracker(DND_DB_PATH, tracker)
+            await interaction.response.send_message(f"Added initiative entry for `{target_id}`.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd ini add channel=%s member=%s", channel_id, target_id)
+        elif action == "roll":
+            tracker = initiative_repo.load_tracker(DND_DB_PATH, channel_id)
+            if not tracker:
+                await interaction.response.send_message("No initiative here. Use `/dnd ini start`.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd ini roll missing tracker channel=%s", channel_id)
+                return
+            if tracker.owner_id != user_id:
+                DEBUG_LOGGER.debug("REJECT /dnd ini roll not owner channel=%s actor=%s owner=%s", channel_id, user_id, tracker.owner_id)
+                await interaction.response.send_message("Only the initiative owner can roll here.", ephemeral=True)
+                return
+            for c in tracker.characters:
+                c.compute()
+            tracker.phase = "status"
+            initiative_repo.save_tracker(DND_DB_PATH, tracker)
+            ordered = tracker.ordered()
+            lines = [f"Initiative (`{_edition_label(_edition_for_guild(interaction))}`):"] + [f"- {c.display_name}: {c.total}" for c in ordered]
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd ini roll channel=%s count=%s", channel_id, len(tracker.characters))
+        elif action == "status":
+            tracker = initiative_repo.load_tracker(DND_DB_PATH, channel_id)
+            if not tracker:
+                await interaction.response.send_message("No initiative tracker here.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd ini status missing channel=%s", channel_id)
+                return
+            ordered = tracker.ordered()
+            lines = [f"Initiative status (`{_edition_label(_edition_for_guild(interaction))}`):"] + [f"- {c.display_name}: {c.total}" for c in ordered]
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd ini status channel=%s count=%s", channel_id, len(ordered))
+        elif action == "clear":
+            tracker = initiative_repo.load_tracker(DND_DB_PATH, channel_id)
+            if not tracker or tracker.owner_id != user_id:
+                DEBUG_LOGGER.debug("REJECT /dnd ini clear not owner channel=%s actor=%s", channel_id, user_id)
+                await interaction.response.send_message("Only the initiative owner can clear this tracker.", ephemeral=True)
+                return
+            initiative_repo.save_tracker(DND_DB_PATH, InitiativeTracker(channel_id=channel_id, guild_id=guild_id, owner_id=user_id))
+            await interaction.response.send_message("Cleared initiative tracker.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd ini clear channel=%s", channel_id)
+        else:
+            DEBUG_LOGGER.debug("REJECT /dnd ini bad action=%s", action)
+            await interaction.response.send_message("Use `start`, `add`, `roll`, `status`, or `clear`.", ephemeral=True)
