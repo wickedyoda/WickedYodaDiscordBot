@@ -4,13 +4,13 @@ from typing import Dict, List
 
 D20_SPLATS: List[str] = [
     "vampire20th",
-    "werewolf",
-    "mage",
-    "demon",
-    "changeling",
-    "wraith",
-    "ghoul",
-    "human",
+    "werewolf20th",
+    "mage20th",
+    "demon20th",
+    "changeling20th",
+    "wraith20th",
+    "ghoul20th",
+    "human20th",
 ]
 
 V5_SPLATS: List[str] = [
@@ -21,11 +21,23 @@ V5_SPLATS: List[str] = [
     "human5th",
 ]
 
+SPECIES_5E_2024: List[str] = [
+    "dragonborn",
+    "dwarf",
+    "elf",
+    "gnome",
+    "half-elf",
+    "half-orc",
+    "halfling",
+    "human",
+    "tiefling",
+]
+
 EDITION_DEFAULTS: Dict[str, List[str]] = {
     "20th": D20_SPLATS,
-    "5e": V5_SPLATS,
-    "5th": V5_SPLATS,
-    "2024": V5_SPLATS,
+    "5e": V5_SPLATS + SPECIES_5E_2024,
+    "5th": V5_SPLATS + SPECIES_5E_2024,
+    "2024": V5_SPLATS + SPECIES_5E_2024,
     "custom": [],
 }
 

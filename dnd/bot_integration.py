@@ -76,6 +76,15 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             return True
         return False
 
+    def _allowed_splats_for_guild(interaction: Any) -> List[str]:
+        if not getattr(interaction, "guild", None):
+            return []
+        data = chronicle_service.get_chronicle(DND_DB_PATH, int(interaction.guild.id))
+        if not data:
+            return []
+        allowed = list(data.get("allowed_splats", []) or [])
+        return allowed
+
     dnd = bot.tree.get_command("dnd")
     if dnd is None:
         raise RuntimeError("Missing `/dnd` application group.")
@@ -91,6 +100,23 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
         if await _enforce_setup(interaction):
             return
         await _log(interaction, "dnd_sheet", f"attribute={attribute} skill={skill} discipline={discipline}", success=True)
+
+    @dnd.command(name="setup", description="Edition-aware D&D setup helpers.")
+    async def setup(interaction: Any, action: str = "show") -> None:  # type: ignore[misc]
+        if not interaction.guild:
+            await interaction.response.send_message("Use in a server.", ephemeral=True)
+            return
+        allowed = _allowed_splats_for_guild(interaction)
+        data = chronicle_service.get_chronicle(DND_DB_PATH, int(interaction.guild.id))
+        edition = (data or {}).get("edition") or "custom"
+        label = _edition_label(edition)
+        lines = [
+            f"Edition: {label}",
+            f"Setup complete: {bool((data or {}).get('edition_setup_completed'))}",
+            f"Allowed splats/species: {', '.join(allowed) if allowed else 'none - rerun /dnd server setup'}",
+        ]
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        await _log(interaction, "dnd_setup", f"edition={edition}", success=True)
 
     @dnd.command(name="xp", description="XP tracking helpers.")
     async def xp(interaction: Any, action: str = "add", amount: float = 1.0, reason: str = "") -> None:  # type: ignore[misc]
