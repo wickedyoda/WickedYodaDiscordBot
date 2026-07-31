@@ -90,7 +90,7 @@ def build_derived(edition: str, fields: Dict[str, Any]) -> Dict[str, Any]:
         {
             "ac": final_ac,
             "max_hp": max_hp,
-            "current_hp": _to_int(fields.get("current_hp") or derived["max_hp"]),
+            "current_hp": _to_int(fields.get("current_hp") or max_hp),
             "hit_die": hit_die,
             "level": level,
             "proficiency": proficiency,
@@ -167,6 +167,8 @@ def render_ability_block(edition: str, derived: Dict[str, Any]) -> str:
 def _to_int(value: Any) -> int:
     if value is None:
         return 0
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
     text = str(value).strip()
     if not text:
         return 0
@@ -177,11 +179,13 @@ def _to_int(value: Any) -> int:
 
 
 def _clean_list(value: Any) -> list[str]:
-    if not value:
+    if value is None:
         return []
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     text = str(value)
+    if not text:
+        return []
     if "," in text:
         return [part.strip() for part in text.split(",") if part.strip()]
     return [part.strip() for part in text.splitlines() if part.strip()]

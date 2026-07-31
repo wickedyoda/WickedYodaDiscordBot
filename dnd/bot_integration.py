@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-import discord
+import json
+import sqlite3
 from typing import Any, Dict, List, Optional
 
+import discord
 from discord import app_commands
 
 from dnd import chronicle_service
@@ -47,6 +49,85 @@ def _edition_label(edition: str) -> str:
 def _get_db_path() -> str:
     return DND_DB_PATH
 
+
+def _member_default_character(db_path: str, guild_id: int, user_id: int) -> str | None:
+    row = (
+        _get_conn(db_path)
+        .execute(
+            "SELECT default_character FROM dnd_chronicle_members WHERE guild_id=? AND user_id=?",
+            (int(guild_id), int(user_id)),
+        )
+        .fetchone()
+    )
+    if not row:
+        return None
+    value = row["default_character"] if isinstance(row, sqlite3.Row) else row[0]
+    if value:
+        return str(value)
+    return None
+
+
+def _resolve_default_character_fields(db_path: str, guild_id: int, user_id: int) -> Dict[str, Any]:
+    member_name = _member_default_character(db_path, guild_id, user_id)
+    if not member_name:
+        return {}
+    row = _get_conn(db_path).execute(
+        "SELECT json FROM dnd_characters WHERE guild_id=? AND owner_id=? AND name=?",
+        (int(guild_id), int(user_id), member_name),
+    ).fetchone()
+    if not row:
+        return {}
+    payload = json.loads(row["json"])
+    return payload.get("fields") or {}
+
+
+def _resolve_attribute_for_sheet(edition: str, attribute: str | None, fields: Dict[str, Any]) -> int:
+    if not attribute or not fields:
+        return 0
+    attr = attribute.strip().lower()
+    edition_key = (edition or "").strip().lower()
+    stat_map_5e = {
+        "str": "strength", "strength": "strength",
+        "dex": "dexterity", "dexterity": "dexterity",
+        "con": "constitution", "constitution": "constitution",
+        "int": "intelligence", "intelligence": "intelligence",
+        "wis": "wisdom", "wisdom": "wisdom",
+        "cha": "charisma", "charisma": "charisma",
+    }
+    stat_map_20th = {
+        "str": "strength", "strength": "strength",
+        "dex": "dexterity", "dexterity": "dexterity",
+        "sta": "stamina", "stamina": "stamina",
+        "cha": "charisma", "charisma": "charisma",
+        "man": "manipulation", "manipulation": "manipulation",
+        "app": "appearance", "appearance": "appearance",
+        "per": "perception", "perception": "perception",
+        "int": "intelligence", "intelligence": "intelligence",
+        "wit": "wits", "wits": "wits",
+    }
+    stat_map = stat_map_20th if edition_key.startswith("20th") else stat_map_5e
+    stat_key = stat_map.get(attr, attr)
+    if stat_key not in stat_map.values():
+        return 0
+    return _to_int(fields.get(stat_key))
+
+
+def _resolve_skill_for_sheet(skill: str | None, fields: Dict[str, Any]) -> int:
+    if not skill or not fields:
+        return 0
+    key = skill.strip().lower()
+    skill_text = str(fields.get("skills") or "")
+    if not skill_text:
+        return 0
+    candidates = [part.strip().lower() for part in skill_text.replace("\n", ",").split(",") if part.strip()]
+    return 2 if key in candidates else 0
+
+
+def _active_character_initiative_stat(edition: str, fields: Dict[str, Any]) -> int:
+    edition_key = (edition or "").strip().lower()
+    if edition_key.startswith("20th"):
+        return _resolve_attribute_for_sheet(edition, "wits", fields)
+    return _resolve_attribute_for_sheet(edition, "dexterity", fields)
 
 def ensure_dnd_schema() -> None:
     from dnd.chronicle_schema import ensure_schema as ensure_chronicle_schema
@@ -159,12 +240,29 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             return
         DEBUG_LOGGER.debug("ACCEPT /dnd roll edition=%s system=%s", edition, system)
         try:
-            result = route_roll(edition=edition, system=system, pool=pool, difficulty=difficulty, modifier=modifier)
+            result = route_roll(
+                edition=edition,
+                system=system,
+                pool=pool,
+                difficulty=difficulty,
+                modifier=modifier,
+                hunger=False,
+                nightmare=0,
+                willpower=willpower,
+                speciality=speciality,
+                notes=notes,
+            )
             lines = [
                 f"Roll `{system}` for {_edition_label(edition)}: pool={result['pool']} diff={result['difficulty']}",
                 f"Dice: {', '.join(str(x) for x in result['dice'])}",
                 f"Successes: {result['successes']} | Outcome: {result['outcome']}",
             ]
+            if willpower:
+                lines.append("Willpower: spent")
+            if speciality:
+                lines.append(f"Specialty: {speciality}")
+            if notes:
+                lines.append(f"Notes: {notes}")
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
             DEBUG_LOGGER.debug("ACCEPT /dnd roll result successes=%s outcome=%s", result.get("successes"), result.get("outcome"))
         except RollError as exc:
@@ -213,10 +311,21 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             return
         system = edition_info.roll_systems[0] if edition_info and edition_info.roll_systems else edition
         sheet_supported = bool(edition_info.sheet_roll_supported) if edition_info else False
+        guild_id = int(interaction.guild.id)
+        user_id = int(interaction.user.id)
         if sheet_supported:
-            DEBUG_LOGGER.debug("EXECUTE /dnd sheet system=%s hunger=%s", system, bool(discipline))
+            fields = _resolve_default_character_fields(DND_DB_PATH, guild_id, user_id)
+            base_pool = 3
+            attribute_value = _resolve_attribute_for_sheet(edition, attribute, fields)
+            if attribute_value:
+                base_pool += attribute_value
+            skill_value = _resolve_skill_for_sheet(skill, fields)
+            if skill_value:
+                base_pool += skill_value
+            actual_pool = max(1, base_pool + int(modifier or 0))
+            DEBUG_LOGGER.debug("EXECUTE /dnd sheet system=%s hunger=%s pool=%s", system, bool(discipline), actual_pool)
             try:
-                result = route_roll(edition=edition, system=system or edition, pool=3 + int(modifier or 0), difficulty=difficulty, hunger=bool(discipline))
+                result = route_roll(edition=edition, system=system or edition, pool=actual_pool, difficulty=difficulty, hunger=bool(discipline))
                 if discipline:
                     result["outcome"] = result.get("outcome", "") + " (Hunger)"
                 lines = [
@@ -224,6 +333,10 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                     f"Dice: {', '.join(str(x) for x in result['dice'])}",
                     f"Successes: {result['successes']} | Outcome: {result['outcome']}",
                 ]
+                if attribute:
+                    lines.append(f"Attribute: {attribute}")
+                if skill:
+                    lines.append(f"Skill: {skill}")
                 await interaction.response.send_message("\n".join(lines), ephemeral=True)
             except RollError as exc:
                 DEBUG_LOGGER.debug("ERROR /dnd sheet engine=%s", exc, exc_info=True)
@@ -541,8 +654,19 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             ]
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
         else:
-            update_chronicle(DND_DB_PATH, guild_id, name=name, owner_id=int(interaction.user.id))
+            data = chronicle_service.get_chronicle(DND_DB_PATH, guild_id)
+            if not data:
+                await interaction.response.send_message("No chronicle in this server. Use `/dnd server setup`.", ephemeral=True)
+                return
+            current_owner = int(data.get("owner_id") or 0)
+            actor = int(interaction.user.id)
+            if current_owner and current_owner != actor:
+                await interaction.response.send_message("Only the chronicle owner can update settings.", ephemeral=True)
+                DEBUG_LOGGER.debug("REJECT /dnd server update not owner actor=%s owner=%s", actor, current_owner)
+                return
+            update_chronicle(DND_DB_PATH, guild_id, name=name, owner_id=current_owner or actor)
             await interaction.response.send_message("Updated chronicle settings.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd server update name=%s owner=%s", name, current_owner or actor)
 
     @dnd.command(name="group", description="Proxy group CRUD.")
     async def group(interaction: Any, action: str = "list", name: str = "", description: str = "", proxy: str = "") -> None:  # type: ignore[misc]
@@ -694,12 +818,14 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
                 return
             edition = _edition_for_guild(interaction)
             stat = "wits" if edition.startswith("20th") else "dexterity"
-            # Use a stable member_id/author fallback; actual field lookup is ed/sheet-dependent
-            char = InitiativeCharacter(member_id=target_id, display_name=str(target_id), dex_wits=3)
+            fields = _resolve_default_character_fields(DND_DB_PATH, guild_id, user_id)
+            dex_wits = _resolve_attribute_for_sheet(edition, stat, fields) or 0
+            display_name = _member_default_character(DND_DB_PATH, guild_id, target_id) or str(target_id)
+            char = InitiativeCharacter(member_id=target_id, display_name=display_name, dex_wits=max(0, dex_wits))
             tracker.characters.append(char)
             initiative_repo.save_tracker(DND_DB_PATH, tracker)
-            await interaction.response.send_message(f"Added initiative entry for `{target_id}`.", ephemeral=True)
-            DEBUG_LOGGER.debug("ACCEPT /dnd ini add channel=%s member=%s", channel_id, target_id)
+            await interaction.response.send_message(f"Added initiative entry for `{display_name}` with {stat}={max(0, dex_wits)}.", ephemeral=True)
+            DEBUG_LOGGER.debug("ACCEPT /dnd ini add channel=%s member=%s stat=%s value=%s", channel_id, target_id, stat, max(0, dex_wits))
         elif action == "roll":
             tracker = initiative_repo.load_tracker(DND_DB_PATH, channel_id)
             if not tracker:

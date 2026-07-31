@@ -37,7 +37,13 @@ def route_roll(edition: str, system: str, pool: int = 1, difficulty: int = 6, mo
         }
 
     if target == "20th":
-        result = roll_20th_pool(count=pool, difficulty=difficulty, nightmare=int(kwargs.get("nightmare", 0)))
+        result = roll_20th_pool(
+            count=pool,
+            difficulty=difficulty,
+            nightmare=int(kwargs.get("nightmare", 0)),
+            willpower=int(kwargs.get("willpower", 0)),
+        )
+        dice = result.black_dice + result.nightmare_dice
         return {
             "edition": edition,
             "system": target,
@@ -45,7 +51,7 @@ def route_roll(edition: str, system: str, pool: int = 1, difficulty: int = 6, mo
             "difficulty": result.difficulty,
             "successes": result.successes,
             "outcome": result.outcome,
-            "dice": result.black_dice + result.nightmare_dice,
+            "dice": dice,
         }
 
     raise RollError(f"Unhandled roll system: {target}")

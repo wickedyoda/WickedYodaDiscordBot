@@ -170,13 +170,14 @@ def roll_d20() -> int:
     return int(secrets.randbelow(10) + 1)
 
 
-def roll_pool(count: int, difficulty: int, nightmare: int = 0) -> RollResults20th:
-    if nightmare > count:
-        raise ValueError("Nightmare dice cannot exceed pool size.")
+def roll_pool(count: int, difficulty: int, nightmare: int = 0, willpower: int = 0) -> RollResults20th:
+    if nightmare + willpower > count:
+        raise ValueError("Nightmare and willpower dice cannot exceed pool size.")
     pool = max(1, count)
-    regular_dice = pool - nightmare
+    regular_dice = pool - nightmare - willpower
     black: list[int] = [roll_d20() for _ in range(regular_dice)]
     nightmare_dice: list[int] = [roll_d20() for _ in range(nightmare)]
-    results = RollResults20th(pool=pool, difficulty=difficulty, black_dice=black, nightmare_dice=nightmare_dice)
+    willpower_dice: list[int] = [roll_d20() for _ in range(willpower)]
+    results = RollResults20th(pool=pool, difficulty=difficulty, black_dice=black, nightmare_dice=nightmare_dice + willpower_dice)
     results.compute()
     return results
