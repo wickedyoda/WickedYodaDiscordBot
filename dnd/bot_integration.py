@@ -209,7 +209,12 @@ def register_dnd_commands(bot: Any, helpers: Optional[Dict[str, Any]] = None) ->
             if not edition:
                 await interaction.response.send_message("Specify an edition: `20th`, `5e`, `custom`.", ephemeral=True)
                 return
-            await interaction.response.send_message(editions.edition_help(edition), ephemeral=True)
+            info_data = editions.edition_help(edition)
+            reference = (
+                f"\nReference: {editions.WIKI_REFERENCE_URL}\n"
+                f"Summary: {editions.WIKI_SUMMARY}"
+            )
+            await interaction.response.send_message(info_data + reference, ephemeral=True)
         elif topic == "splat":
             splat = choice.strip()
             edition = _edition_for_guild(interaction)
