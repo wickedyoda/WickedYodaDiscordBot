@@ -2,6 +2,7 @@
 set -e
 
 mkdir -p /app/data /logs
+sh /app/scripts/migrate_db.sh || true
 
 if [ "$(id -u)" -eq 0 ]; then
   chown -R botuser:botuser /app/data /logs || true

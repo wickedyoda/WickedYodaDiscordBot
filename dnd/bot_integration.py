@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sqlite3
 from typing import Any
 
@@ -22,8 +24,41 @@ from dnd.debug_logger import get_logger, log_command
 from dnd.editions import _edition_for_splat
 from dnd.roll_router import RollError, route_roll
 
-DND_DB_PATH = "/app/data/dnd.db"
+DEFAULT_DND_DB_PATH = "/app/data/storage/dnd.db"
+LEGACY_DND_DB_PATH = "/app/data/dnd.db"
+DND_DB_PATH = os.getenv("DND_DB_PATH", DEFAULT_DND_DB_PATH)
 DEBUG_LOGGER = get_logger("wickedyoda.dnd")
+
+
+def _migrate_dnd_db() -> None:
+    legacy = LEGACY_DND_DB_PATH
+    target = DND_DB_PATH
+    if not os.path.exists(legacy):
+        return
+    if os.path.abspath(legacy) == os.path.abspath(target):
+        return
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        if not os.path.exists(target):
+            shutil.move(legacy, target)
+            get_logger("wickedyoda.dnd").info("Migrated D&D DB from %s to %s.", legacy, target)
+        for suffix in ("", "-wal", "-shm"):
+            source = f"{legacy}{suffix}"
+            destination = f"{target}{suffix}"
+            if os.path.exists(source) and not os.path.exists(destination):
+                shutil.move(source, destination)
+        if os.path.exists(legacy) and os.path.abspath(legacy) != os.path.abspath(target):
+            os.remove(legacy)
+            for suffix in ("-wal", "-shm"):
+                sidecar = f"{legacy}{suffix}"
+                if os.path.exists(sidecar):
+                    os.remove(sidecar)
+            get_logger("wickedyoda.dnd").info("Removed legacy D&D DB at %s after migration.", legacy)
+    except Exception as exc:  # pragma: no cover - safety net for filesystem surprises
+        get_logger("wickedyoda.dnd").warning("D&D DB migration from %s to %s failed: %s", legacy, target, exc)
+
+
+_migrate_dnd_db()
 
 EDITION_CHOICES = [
     app_commands.Choice(name="20th Anniversary / World of Darkness", value="20th"),

@@ -19,6 +19,8 @@ services:
       - ${DATA_DIR:-/root/docker/wickedyodabot}:/app/data
       # LOG_DIR here is the host-side bind path; the container target remains /logs.
       - ${LOG_DIR:-/root/docker/wickedyodabot/logs}:/logs
+      # Optional explicit storage bind for protected SQLite databases.
+      - ${STORAGE_DIR:-/root/docker/wickedyodabot/storage}:/app/data/storage
       # Persist web GUI env overrides to host so settings survive restarts.
       - ${WEB_ENV_FILE_HOST:-/root/docker/wickedyodabot/env.env}:/app/env.env
       - /etc/localtime:/etc/localtime:ro

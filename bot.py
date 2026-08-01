@@ -10,6 +10,7 @@ import logging.handlers
 import os
 import re
 import secrets
+import shutil
 import socket
 import sqlite3
 import tempfile
@@ -2093,13 +2094,47 @@ def format_uptime_summary(snapshot: dict) -> str:
     return truncate_log_text(message, max_length=1800)
 
 
+def _migrate_action_db(legacy_path: str, target_path: str, active_path: str) -> None:
+    if not os.path.exists(legacy_path):
+        return
+    if os.path.abspath(legacy_path) == os.path.abspath(active_path):
+        return
+    try:
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        if not os.path.exists(target_path):
+            shutil.move(legacy_path, target_path)
+            logger.info("Migrated action DB from %s to %s.", legacy_path, target_path)
+        for suffix in ("", "-wal", "-shm"):
+            source = f"{legacy_path}{suffix}"
+            target = f"{target_path}{suffix}"
+            if os.path.exists(source) and not os.path.exists(target):
+                shutil.move(source, target)
+        if not os.path.exists(legacy_path):
+            return
+        if os.path.abspath(legacy_path) == os.path.abspath(active_path):
+            return
+        os.remove(legacy_path)
+        for suffix in ("-wal", "-shm"):
+            sidecar = f"{legacy_path}{suffix}"
+            if os.path.exists(sidecar):
+                os.remove(sidecar)
+        logger.info("Removed legacy action DB at %s after migration.", legacy_path)
+    except Exception as exc:
+        logger.warning("Action DB migration from %s to %s failed: %s", legacy_path, target_path, exc)
+
+
 def resolve_action_db_path() -> str:
     configured_path = os.getenv("ACTION_DB_PATH", "").strip()
-    preferred_path = configured_path or os.path.join(DATA_DIR, "mod_actions.db")
+    storage_path = os.path.join(DATA_DIR, "storage", "mod_actions.db")
+    legacy_path = os.path.join(DATA_DIR, "mod_actions.db")
+    preferred_path = configured_path or storage_path
+    candidates = [preferred_path]
+    if legacy_path not in candidates:
+        candidates.append(legacy_path)
+
     fallback_root = os.path.join(tempfile.gettempdir(), "wickedyoda")
     fallback_path = os.path.join(fallback_root, "mod_actions.db")
-    candidates = [preferred_path]
-    if fallback_path != preferred_path:
+    if fallback_path not in candidates:
         candidates.append(fallback_path)
 
     for path in candidates:
@@ -2111,6 +2146,8 @@ def resolve_action_db_path() -> str:
                 conn.execute("PRAGMA user_version = 1")
                 conn.commit()
             secure_sqlite_sidecars(path)
+            if path == preferred_path:
+                _migrate_action_db(legacy_path, storage_path, path)
             if path != preferred_path:
                 logger.warning("Action DB path %s is not writable; using fallback %s", preferred_path, path)
             return path
