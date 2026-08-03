@@ -1,5 +1,5 @@
 bandit==1.9.4
-beautifulsoup4==4.12.3
+beautifulsoup4==4.15.0
 croniter==2.0.7
 cryptography==49.0.0
 defusedxml==0.7.1
