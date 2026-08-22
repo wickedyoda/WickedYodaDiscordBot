@@ -4,6 +4,7 @@ import csv
 import http.client
 import importlib.util
 import io
+import ipaddress
 import json
 import logging
 import logging.handlers
@@ -834,12 +835,34 @@ def parse_tcp_target(raw_value: str) -> tuple[str, int]:
     return host, port
 
 
+def _is_private_or_internal_host(host: str) -> bool:
+    """Return True if host is localhost, private, link-local, loopback, reserved, multicast, or unspecified."""
+    hostname = (host or "").strip().lower()
+    if not hostname or hostname in {"localhost", "::1", "ip6-localhost"} or hostname.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
 def require_http_url(raw_url: str) -> str:
     parsed = urllib.parse.urlparse(raw_url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("Only http/https URLs are allowed.")
     if not parsed.netloc:
         raise ValueError("URL must include a host.")
+    host = parsed.hostname or ""
+    if _is_private_or_internal_host(host):
+        raise ValueError("URL must not point to a private or internal address.")
     return raw_url
 
 
@@ -876,6 +899,8 @@ def check_statuspage_endpoint(url: str, timeout_seconds: int) -> tuple[bool, int
 
 
 def check_tcp_endpoint(host: str, port: int, timeout_seconds: int) -> tuple[bool, int, str]:
+    if _is_private_or_internal_host(host):
+        raise ValueError("TCP target must not point to a private or internal address.")
     start = time.monotonic()
     with socket.create_connection((host, port), timeout=timeout_seconds):
         pass

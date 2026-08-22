@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Any
 
-LOG_PATH = os.environ.get("WICKEDYODA_DND_DEBUG_LOG", "/tmp/wickedyoda_dnd_debug.log")
+LOG_PATH = os.environ.get("WICKEDYODA_DND_DEBUG_LOG") or os.path.join(os.environ.get("DATA_DIR", "/app/data"), "dnd_debug.log")
 
 
 def get_logger(name: str = "dnd") -> logging.Logger:
@@ -22,7 +22,10 @@ def get_logger(name: str = "dnd") -> logging.Logger:
     stream_handler.setLevel(logging.DEBUG)
     stream_handler.setFormatter(formatter)
 
-    file_handler = logging.FileHandler(LOG_PATH, encoding="utf-8")
+    _parent = os.path.dirname(LOG_PATH)
+    if _parent:
+        os.makedirs(_parent, exist_ok=True)
+    file_handler = logging.FileHandler(LOG_PATH, encoding="utf-8", delay=True)
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)
 

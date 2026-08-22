@@ -1,5 +1,6 @@
 import hashlib
 import io
+import ipaddress
 import json
 import logging
 import os
@@ -138,6 +139,25 @@ def _normalize_wordpress_source(raw_value: str) -> str:
     return normalized.rstrip("/") if normalized != f"{parsed.scheme}://{parsed.netloc}/" else normalized
 
 
+def _is_blocked_ip_address(host: str) -> bool:
+    """Return True if host is localhost, private, link-local, loopback, reserved, multicast, or unspecified."""
+    hostname = (host or "").strip().lower()
+    if not hostname or hostname in {"localhost", "::1", "ip6-localhost"} or hostname.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
 def _normalize_monitor_target(raw_value: str, monitor_type: str) -> str:
     candidate = str(raw_value or "").strip()
     if not candidate:
@@ -148,6 +168,8 @@ def _normalize_monitor_target(raw_value: str, monitor_type: str) -> str:
         parsed = urlparse(candidate)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("HTTP monitor target must be a valid http(s) URL.")
+        if _is_blocked_ip_address(parsed.hostname or ""):
+            raise ValueError("Monitor target must not point to a private or internal address.")
         return urlunparse(parsed)
     if monitor_type == "statuspage":
         if "://" not in candidate:
@@ -155,6 +177,8 @@ def _normalize_monitor_target(raw_value: str, monitor_type: str) -> str:
         parsed = urlparse(candidate)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("Status page URL must be a valid http(s) URL.")
+        if _is_blocked_ip_address(parsed.hostname or ""):
+            raise ValueError("Monitor target must not point to a private or internal address.")
         path = parsed.path.rstrip("/")
         if not path.endswith("/api/v2/status.json"):
             path = f"{path}/api/v2/status.json" if path else "/api/v2/status.json"
@@ -169,6 +193,8 @@ def _normalize_monitor_target(raw_value: str, monitor_type: str) -> str:
         host, port_text = candidate.rsplit(":", 1)
         if not host.strip():
             raise ValueError("TCP target must include a host.")
+        if _is_blocked_ip_address(host.strip()):
+            raise ValueError("TCP target must not point to a private or internal address.")
         if not port_text.strip().isdigit():
             raise ValueError("TCP target port must be numeric.")
         port = int(port_text.strip())
