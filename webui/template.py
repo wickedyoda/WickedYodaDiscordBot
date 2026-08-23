@@ -1656,6 +1656,19 @@ PAGE_TEMPLATE = """
         {% if not api_key_configured and not can_manage_guild %}
         <p class="text-warning small mt-2">API key not configured. Configure it above to manage monitors.</p>
         {% endif %}
+        {% if instance_url and can_manage_guild %}
+        <div class="row g-2 mt-2">
+          <div class="col-12 d-flex align-items-end">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="uptime_kuma_admin_enabled" name="uptime_kuma_admin_enabled" value="true" {% if session.get('kuma_admin_proxy_enabled') %}checked{% endif %}>
+              <label class="form-check-label" for="uptime_kuma_admin_enabled">Enable web UI reverse proxy</label>
+            </div>
+          </div>
+          <div class="col-12">
+            <p class="text-secondary small">When enabled, access the Kuma web UI directly at <code>/admin/uptime-kuma/proxy/</code>.</p>
+          </div>
+        </div>
+        {% endif %}
       </form>
 
       {% if kuma_error %}

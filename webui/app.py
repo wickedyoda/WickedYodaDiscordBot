@@ -4,6 +4,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import secrets
 import smtplib
 import sqlite3
@@ -17,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from functools import wraps
 from pathlib import Path
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 from flask import Flask, flash, redirect, render_template_string, request, send_file, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -3541,6 +3542,7 @@ def create_app(
             kuma_enabled=kuma_enabled,
             instance_url=instance_url,
             api_key_configured=bool(api_key),
+            kuma_admin_proxy_enabled=os.getenv("UPTIME_KUMA_ADMIN_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
             kuma_monitors=kuma_monitors,
             kuma_error=kuma_error,
             timeout_options=list(UPTIME_MONITOR_TIMEOUT_OPTIONS),
@@ -3556,12 +3558,14 @@ def create_app(
         api_key_clear = str(request.form.get("api_key_clear", "")).strip().lower()
         timeout_seconds = _normalize_kuma_timeout(request.form.get("timeout_seconds", "30"))
         verify_tls = str(request.form.get("verify_tls", "true")).strip().lower() in {"1", "true", "yes", "on"}
+        admin_proxy_enabled = str(request.form.get("uptime_kuma_admin_enabled", "")).strip().lower() in {"1", "true", "yes", "on"}
         updates = {
             "UPTIME_KUMA_ENABLED": "true" if instance_url else "false",
             "UPTIME_KUMA_BASE_URL": instance_url,
             "UPTIME_KUMA_API_KEY": api_key,
             "UPTIME_KUMA_TIMEOUT_SECONDS": str(timeout_seconds),
             "UPTIME_KUMA_VERIFY_TLS": "true" if verify_tls else "false",
+            "UPTIME_KUMA_ADMIN_ENABLED": "true" if admin_proxy_enabled else "false",
         }
         if api_key_clear in {"1", "true", "yes", "on"}:
             updates["UPTIME_KUMA_API_KEY"] = ""
@@ -3673,6 +3677,107 @@ def create_app(
         if not _current_user_can_manage_guild():
             return _reject_read_only_write("uptime_kuma_page")
         return redirect(url_for("uptime_kuma_page"))
+
+    @app.route("/admin/uptime-kuma/proxy/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
+    @login_required
+    def uptime_kuma_proxy(subpath: str):
+        """Reverse proxy to the authenticated Uptime Kuma web UI.
+
+        Forwards the request to the instance configured by UPTIME_KUMA_BASE_URL
+        and requires UPTIME_KUMA_ADMIN_ENABLED=true.
+        Only logged-in admin web users can reach this proxy.
+        """
+        user = _current_user()
+        if not user or not user.get("is_admin"):
+            return "Forbidden", 403
+
+        kuma_proxy_enabled = os.getenv("UPTIME_KUMA_ADMIN_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+        if not kuma_proxy_enabled:
+            return "Uptime Kuma admin proxy is not enabled.", 404
+
+        page_state = _load_uptime_kuma_page_state()
+        instance_url = str(page_state.get("instance_url", "")).strip()
+        if not instance_url:
+            return "UPTIME_KUMA_BASE_URL is not configured.", 502
+
+        # Strict whitelist to prevent URL injection / reflected XSS / SSRF
+        if not re.match(r"^[a-zA-Z0-9._/\-]+$", subpath):
+            return "Invalid path segment in proxy request.", 400
+
+        import requests
+
+        base = instance_url.rstrip("/") + "/"
+        safe_subpath = subpath.replace("..", "").lstrip("/")
+        safe_subpath = re.sub(r"^[a-zA-Z]+://", "", safe_subpath)
+        target_url = urljoin(base, safe_subpath)
+
+        headers = {}
+        for key, value in request.headers.items():
+            if key.lower() in {"host", "content-length", "content-encoding"}:
+                continue
+            headers[key] = value
+
+        body = request.get_data()
+        verify_tls = page_state.get("verify_tls", True)
+        try:
+            resp = requests.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                data=body if body else None,
+                params=request.args,
+                cookies=request.cookies,
+                allow_redirects=False,
+                verify=verify_tls,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logging.getLogger("wickedyoda-web-admin").warning("Uptime Kuma proxy error for %s", target_url)
+            return "Uptime Kuma proxy error.", 502
+
+        def _proxy_body():
+            try:
+                yield from resp.raw.stream(8192, decode_content=False)
+            except Exception:
+                logging.getLogger("wickedyoda-web-admin").exception("Error streaming upstream response for %s", target_url)
+
+        response_body = _proxy_body()
+        excluded_headers = {
+            "content-encoding",
+            "content-length",
+            "transfer-encoding",
+            "connection",
+        }
+        response_headers = []
+        for key, value in resp.raw.headers.items():
+            if key.lower() not in excluded_headers:
+                response_headers.append((key, value))
+
+        location = resp.headers.get("Location", "")
+        if location:
+            parsed = urlparse(location)
+            if parsed.scheme and parsed.netloc:
+                new_location = f"/admin/uptime-kuma/proxy{parsed.path}"
+                if parsed.query:
+                    new_location += f"?{parsed.query}"
+                response_headers.append(("Location", new_location))
+            else:
+                if not parsed.scheme or parsed.scheme in {"http", "https"}:
+                    response_headers.append(("Location", location))
+                else:
+                    response_headers.append(("Location", "/admin/uptime-kuma/proxy/"))
+
+        response_headers.append(("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'"))
+        response_headers.append(("X-Content-Type-Options", "nosniff"))
+        response_headers.append(("X-Frame-Options", "DENY"))
+
+        from flask import Response
+        return Response(
+            response_body,
+            status=resp.status_code,
+            headers=response_headers,
+            mimetype=resp.headers.get("Content-Type", "application/octet-stream"),
+        )
 
     @app.get("/admin/observability")
     @admin_required
