@@ -648,6 +648,7 @@ PAGE_TEMPLATE = """
                 <option value="{{ url_for('wordpress_feeds') }}">WordPress</option>
                 <option value="{{ url_for('linkedin_feeds') }}">LinkedIn</option>
                 <option value="{{ url_for('uptime_monitors_page') }}">Uptime Monitors</option>
+                <option value="{{ url_for('uptime_kuma_page') }}">Uptime Kuma Admin</option>
                 <option value="{{ url_for('status_page') }}">Status</option>
                 <option value="{{ url_for('honeypot') }}">Honeypot</option>
                 <option value="{{ url_for('role_access') }}">Role Access</option>
@@ -1625,6 +1626,145 @@ PAGE_TEMPLATE = """
           </table>
         </div>
       </div>
+    {% elif page == "uptime_kuma" %}
+      <div class="card card-soft p-3 mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h1 class="h5 mb-0">Uptime Kuma Admin</h1>
+          <span class="badge text-bg-{{ 'success' if kuma_enabled else 'secondary' }}">{{ 'Enabled' if kuma_enabled else 'Disabled' }}</span>
+        </div>
+        <p class="text-secondary mb-0">Manage monitors on your local Uptime Kuma Docker container.</p>
+      </div>
+
+      <form method="post" action="{{ url_for('uptime_kuma_settings') }}" class="card card-soft p-3 mb-3">
+        <h2 class="h6 mb-2">Connection Settings</h2>
+        <div class="row g-2">
+          <div class="col-12 col-md-6">
+            <label class="form-label" for="instance_url">Host / URL</label>
+            <input class="form-control" id="instance_url" name="instance_url" value="{{ instance_url or '' }}" placeholder="http://10.0.84.2:3001" {% if not can_manage_guild %}disabled{% endif %}>
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label" for="api_key">API Key</label>
+            <input class="form-control" id="api_key" name="api_key" type="password" autocomplete="off" {% if not can_manage_guild %}disabled{% endif %}>
+          </div>
+          <div class="col-12 col-md-1"> d-flex align-items-end">
+            <button type="checkbox" name="api_key_clear" value="true" {% if not can_manage_guild %}disabled{% endif %}>Clear</button>
+          </div>
+          <div class="col-12 col-md-2 d-flex align-items-end">
+            <button class="btn" type="submit" {% if not can_manage_guild %}disabled{% endif %}>Save Settings</button>
+          </div>
+        </div>
+        {% if not api_key_configured and not can_manage_guild %}
+        <p class="text-warning small mt-2">API key not configured. Configure it above to manage monitors.</p>
+        {% endif %}
+      </form>
+
+      {% if kuma_error %}
+      <div class="card card-soft p-3 mb-3">
+        <div class="text-danger small">{{ kuma_error }}</div>
+      </div>
+      {% endif %}
+
+      <div class="card card-soft p-3 mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h2 class="h6 mb-0">Monitors</h2>
+          <a href="{{ url_for('uptime_kuma_add_monitor_form') }}" class="btn btn-sm btn-outline-primary" {% if not can_manage_guild %}disabled{% endif %}>+ Add Monitor</a>
+        </div>
+        {% if kuma_monitors %}
+        <div class="table-wrap">
+          <table class="table table-sm align-middle">
+            <thead><tr><th>ID</th><th>Name</th><th>URL</th><th>Type</th><th>Interval (s)</th><th>Active</th><th>Actions</th></tr></thead>
+            <tbody>
+              {% for m in kuma_monitors %}
+              <tr>
+                <td class="small text-secondary">{{ m.id }}</td>
+                <td>{{ m.name or '-' }}</td>
+                <td class="small">{{ m.url or '-' }}</td>
+                <td>{{ m.type or m.method or '-' }}</td>
+                <td class="small">{{ m.interval or '-' }}</td>
+                <td><span class="badge text-bg-{{ 'success' if m.active else 'danger' }}">{{ 'Active' if m.active else 'Inactive' }}</span></td>
+                <td>
+                  <a href="{{ url_for('uptime_kuma_edit_monitor_form', monitor_id=m.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                  <form method="post" action="{{ url_for('uptime_kuma_delete_monitor', monitor_id=m.id) }}" style="display:inline">
+                    <button class="btn btn-sm btn-outline-danger" type="submit" {% if not can_manage_guild %}disabled{% endif %}>Delete</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-secondary small">No monitors found. Add one to get started.</p>
+        {% endif %}
+      </div>
+    {% elif page == "uptime_kuma_monitor_form" %}
+      <div class="card card-soft p-3 mb-3">
+        <h1 class="h5 mb-2">{{ "Edit" if monitor_id else "Add" }} Monitor</h1>
+        <p class="text-secondary mb-0">Fill in the monitor details below.</p>
+      </div>
+      <form method="post" action="{{ url_for('uptime_kuma_add_monitor') if mode == 'add' else url_for('uptime_kuma_edit_monitor', monitor_id=monitor_id) }}" class="card card-soft p-3 mb-3">
+        <div class="row g-2">
+          <div class="col-12 col-md-6">
+            <label class="form-label" for="monitor_name">Name</label>
+            <input class="form-control" id="monitor_name" name="monitor_name" value="{{ monitor.get('name', '') or '' }}" required {% if not can_manage_guild %}disabled{% endif %}>
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label" for="monitor_type">Type</label>
+            <select class="form-select" id="monitor_type" name="monitor_type" {% if not can_manage_guild %}disabled{% endif %}>
+              <option value="http" {% if (monitor.get('type') or 'http') == 'http' %}selected{% endif %}>HTTP</option>
+              <option value="tcp" {% if monitor.get('type') == 'tcp' %}selected{% endif %}>TCP</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label" for="monitor_url">URL</label>
+            <input class="form-control" id="monitor_url" name="monitor_url" value="{{ monitor.get('url', '') or '' }}" placeholder="https://example.com" {% if not can_manage_guild %}disabled{% endif %}>
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label" for="monitor_hostname">Hostname</label>
+            <input class="form-control" id="monitor_hostname" name="monitor_hostname" value="{{ monitor.get('hostname', '') or '' }}" {% if not can_manage_guild %}disabled{% endif %}>
+          </div>
+          <div class="col-12 col-md-1">
+            <label class="form-label" for="monitor_port">Port</label>
+            <input class="form-control" id="monitor_port" name="monitor_port" value="{{ monitor.get('port', '') or '' }}" {% if not can_manage_guild %}disabled{% endif %}>
+          </div>
+          <div class="col-12 col-md-2 d-flex align-items-end">
+            <button class="btn" type="submit" {% if not can_manage_guild %}disabled{% endif %}>{{ "Update" if monitor_id else "Add" }}</button>
+          </div>
+        </div>
+        <div class="row g-2 mt-2">
+          <div class="col-12 col-md-1 d-flex align-items-end">
+            <label class="form-label" for="monitor_interval">Interval</label>
+          </div>
+          <div class="col-12 col-md-2 d-flex align-items-end">
+            <input class="form-control" id="monitor_interval" name="monitor_interval" type="number" value="{{ monitor.get('interval', 60) }}" {% if not can_manage_guild %}disabled{% endif %}>
+          </div>
+          <div class="col-12 col-md-2 d-flex align-items-end">
+            <label class="form-label" for="monitor_timeout">Timeout</label>
+          </div>
+          <div class="col-12 col-md-1 d-flex align-items-end">
+            <input class="form-control" id="monitor_timeout" name="monitor_timeout" type="number" value="{{ monitor.get('timeout', 30) }}" {% if not can_manage_guild %}disabled{% endif %}>
+          </div>
+          <div class="col-12 col-md-2 d-flex align-items-end">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="monitor_active" name="monitor_active" value="true" {% if monitor.get('active', True) %}checked{% endif %} {% if not can_manage_guild %}disabled{% endif %}>
+              <label class="form-check-label" for="monitor_active">Active</label>
+            </div>
+          </div>
+          <div class="col-12 col-md-2 d-flex align-items-end">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="monitor_ignore_ssl" name="monitor_ignore_ssl" value="true" {% if monitor.get('ignoreSsl', False) %}checked{% endif %} {% if not can_manage_guild %}disabled{% endif %}>
+              <label class="form-check-label" for="monitor_ignore_ssl">Ignore SSL</label>
+            </div>
+          </div>
+          <div class="col-12 col-md-2 d-flex align-items-end">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="monitor_notify" name="monitor_notify" value="true" {% if monitor.get('notify', True) %}checked{% endif %} {% if not can_manage_guild %}disabled{% endif %}>
+              <label class="form-check-label" for="monitor_notify">Notify</label>
+            </div>
+          </div>
+        </div>
+      </form>
+
     {% elif page == "status_admin" %}
       <div class="card card-soft p-3 mb-3">
         <h1 class="h5 mb-2">Service Status</h1>
