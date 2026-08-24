@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watch Tower GUI</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="dashboard">
+        <header>
+            <h1>Watch Tower</h1>
+            <p>Container Update Manager</p>
+            <a href="{{ url_for('logout') }}" class="logout">Logout</a>
+        </header>
+
+        {% if error %}
+        <div class="error">
+            Error: {{ error }}
+            <small>Check that the Docker socket is mounted and accessible.</small>
+        </div>
+        {% endif %}
+
+        <div class="schedule-bar">
+            <label>Cron Schedule for Auto-Update:</label>
+            <input type="text" id="schedule-input" value="{{ current_schedule or '0 */6 * * *' }}" readonly>
+            <button id="edit-schedule-btn" onclick="editSchedule()">Edit</button>
+            <button id="save-schedule-btn" onclick="saveSchedule()" style="display:none;">Save</button>
+        </div>
+
+        <table class="container-table">
+            <thead>
+                <tr>
+                    <th>Container</th>
+                    <th>Image</th>
+                    <th>Current Tag</th>
+                    <th>Latest Tag</th>
+                    <th>Status</th>
+                    <th>Ports</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in containers %}
+                <tr class="{{ 'update-available' if c.update_available else '' }}">
+                    <td>{{ c.name }}</td>
+                    <td>{{ c.image }}</td>
+                    <td>{{ c.current_tag }}</td>
+                    <td>{{ c.latest_tag }}</td>
+                    <td>
+                        {% if c.update_available %}
+                            <span class="badge badge-warning">Update available</span>
+                        {% else %}
+                            <span class="badge badge-ok">Up to date</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ c.ports }}</td>
+                    <td>
+                        {% if c.update_available %}
+                        <button class="update-btn" onclick="updateContainer('{{ c.id }}', '{{ c.name }}')">Update</button>
+                        {% else %}
+                        <button class="update-btn" disabled>Up to date</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if not containers %}
+        <div class="no-containers">
+            No containers detected. Ensure Docker socket is mounted.
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        function updateContainer(containerId, containerName) {
+            if (!confirm("Update container '" + containerName + "'? This will pull the latest image and restart the container.")) {
+                return;
+            }
+            fetch('/update/' + containerId, {method: 'POST', headers: {'Content-Type': 'application/json'}})
+                .then(r => r.json())
+                .then(data => {
+                    alert(data.status ? "Success: " + data.message : "Error: " + data.error);
+                    if (data.status === 'success') location.reload();
+                })
+                .catch(err => alert('Error: ' + err));
+        }
+
+        function editSchedule() {
+            document.getElementById('schedule-input').readOnly = false;
+            document.getElementById('edit-schedule-btn').style.display = 'none';
+            document.getElementById('save-schedule-btn').style.display = 'inline-block';
+        }
+
+        function saveSchedule() {
+            const schedule = document.getElementById('schedule-input').value;
+            fetch('/schedule', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({schedule: schedule})
+            })
+            .then(r => r.json())
+            .then(data => {
+                alert(data.status === 'success' ? 'Schedule saved!' : 'Error: ' + data.error);
+                document.getElementById('schedule-input').readOnly = true;
+                document.getElementById('edit-schedule-btn').style.display = 'inline-block';
+                document.getElementById('save-schedule-btn').style.display = 'none';
+            });
+        }
+    </script>
+</body>
+</html>
