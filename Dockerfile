@@ -12,6 +12,7 @@ RUN apt-get update \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY bot.py ./
+COPY app /app/app
 COPY core /app/core
 COPY webui /app/webui
 COPY dnd /app/dnd
