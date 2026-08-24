@@ -8,6 +8,7 @@ import ipaddress
 import json
 import logging
 import logging.handlers
+import math
 import os
 import re
 import secrets
@@ -5402,7 +5403,10 @@ class ModerationBot(commands.Bot):
         )
 
     def get_web_snapshot(self) -> dict:
-        latency_ms = max(int(self.latency * 1000), 0) if self.is_ready() else 0
+        latency = self.latency if self.is_ready() else None
+        if latency is not None and not math.isfinite(latency):
+            latency = None
+        latency_ms = max(int(latency * 1000), 0) if latency else 0
         managed = self.get_managed_guilds()
         invite_url = ""
         if self.user is not None:
