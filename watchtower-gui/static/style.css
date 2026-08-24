@@ -1,0 +1,42 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a2e; color: #e0e0e0; }
+a { text-decoration: none; color: inherit; }
+button { cursor: pointer; border: none; background: none; }
+
+.login-page { display: flex; justify-content: center; align-items: center; height: 100vh; }
+.login-box { background: #16213e; padding: 3rem; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.4); width: 100%; max-width: 320px; text-align: center; }
+.login-box h1 { color: #e94560; margin-bottom: 1.5rem; font-size: 1.5rem; }
+.login-box input[type="password"] { width: 100%; padding: 0.75rem; margin-bottom: 1rem; background: #0f3460; border: 1px solid #2a3a5e; border-radius: 5px; color: #e0e0e0; }
+.login-box button { width: 100%; padding: 0.75rem; background: #e94560; color: white; border-radius: 5px; font-weight: bold; transition: background 0.2s; }
+.login-box button:hover { background: #c81e45; }
+.flash.error { color: #e94560; margin: 0.5rem 0; }
+
+.dashboard { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+header h1 { color: #e94560; font-size: 1.8rem; }
+.logout { color: #666; font-size: 0.9rem; }
+
+.schedule-bar { background: #16213e; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.5rem; }
+.schedule-bar label { color: #888; font-size: 0.9rem; }
+#schedule-input { background: #0f3460; border: 1px solid #2a3a5e; border-radius: 4px; padding: 0.4rem 0.6rem; color: #e0e0e0; font-family: monospace; flex: 1; }
+#schedule-input[readonly] { background: #0a1f2d; }
+
+.container-table { width: 100%; border-collapse: collapse; background: #16213e; border-radius: 8px; overflow: hidden; }
+.container-table thead th { background: #0f3460; padding: 0.75rem; text-align: left; font-weight: 600; color: #e0e0e0; font-size: 0.85rem; text-transform: uppercase; }
+.container-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid #1a1a3e; font-size: 0.9rem; }
+
+tr.update-available { background: rgba(233, 69, 96, 0.1); }
+tr.update-available td { border-color: rgba(233, 69, 96, 0.3); }
+
+.badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
+.badge-warning { background: rgba(233, 69, 96, 0.2); color: #e94560; }
+.badge-ok { background: rgba(76, 175, 80, 0.2); color: #4caf50; }
+
+.update-btn { background: #e94560; color: white; padding: 0.35rem 0.8rem; border-radius: 4px; font-size: 0.85rem; }
+.update-btn:hover:not(:disabled) { background: #c81e45; }
+.update-btn:disabled { background: #555; cursor: not-allowed; }
+
+.error { background: rgba(233, 69, 96, 0.15); color: #e94560; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+.error small { display: block; margin-top: 0.3rem; color: #aaa; }
+
+.no-containers { text-align: center; padding: 3rem; color: #666; }

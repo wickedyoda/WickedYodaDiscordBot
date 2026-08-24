@@ -168,7 +168,11 @@ Member message activity is also recorded internally and exposed through:
 - `/stats` for a private per-user activity summary in Discord
 - `/admin/member-activity` for guild activity rankings and export in the web GUI
 
-SQLite storage is internal to the container at `/app/data/mod_actions.db`.
+SQLite storage is internal to the container at `/app/data/storage/mod_actions.db`.
+The shipped Compose example bind-mounts `${DATA_DIR:-/root/docker/wickedyodabot}` to `/app/data`
+and `${STORAGE_DIR:-/root/docker/wickedyodabot/storage}` to `/app/data/storage`.
+If `/app/data/mod_actions.db` exists from an older release, the bot migrates it into
+`/app/data/storage/mod_actions.db` on startup and removes the legacy file when possible.
 
 ## Web Admin GUI
 

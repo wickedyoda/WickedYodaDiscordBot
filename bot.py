@@ -4,12 +4,15 @@ import csv
 import http.client
 import importlib.util
 import io
+import ipaddress
 import json
 import logging
 import logging.handlers
+import math
 import os
 import re
 import secrets
+import shutil
 import socket
 import sqlite3
 import tempfile
@@ -833,12 +836,34 @@ def parse_tcp_target(raw_value: str) -> tuple[str, int]:
     return host, port
 
 
+def _is_private_or_internal_host(host: str) -> bool:
+    """Return True if host is localhost, private, link-local, loopback, reserved, multicast, or unspecified."""
+    hostname = (host or "").strip().lower()
+    if not hostname or hostname in {"localhost", "::1", "ip6-localhost"} or hostname.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
 def require_http_url(raw_url: str) -> str:
     parsed = urllib.parse.urlparse(raw_url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("Only http/https URLs are allowed.")
     if not parsed.netloc:
         raise ValueError("URL must include a host.")
+    host = parsed.hostname or ""
+    if _is_private_or_internal_host(host):
+        raise ValueError("URL must not point to a private or internal address.")
     return raw_url
 
 
@@ -875,6 +900,8 @@ def check_statuspage_endpoint(url: str, timeout_seconds: int) -> tuple[bool, int
 
 
 def check_tcp_endpoint(host: str, port: int, timeout_seconds: int) -> tuple[bool, int, str]:
+    if _is_private_or_internal_host(host):
+        raise ValueError("TCP target must not point to a private or internal address.")
     start = time.monotonic()
     with socket.create_connection((host, port), timeout=timeout_seconds):
         pass
@@ -2093,13 +2120,47 @@ def format_uptime_summary(snapshot: dict) -> str:
     return truncate_log_text(message, max_length=1800)
 
 
+def _migrate_action_db(legacy_path: str, target_path: str, active_path: str) -> None:
+    if not os.path.exists(legacy_path):
+        return
+    if os.path.abspath(legacy_path) == os.path.abspath(active_path):
+        return
+    try:
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        if not os.path.exists(target_path):
+            shutil.move(legacy_path, target_path)
+            logger.info("Migrated action DB from %s to %s.", legacy_path, target_path)
+        for suffix in ("", "-wal", "-shm"):
+            source = f"{legacy_path}{suffix}"
+            target = f"{target_path}{suffix}"
+            if os.path.exists(source) and not os.path.exists(target):
+                shutil.move(source, target)
+        if not os.path.exists(legacy_path):
+            return
+        if os.path.abspath(legacy_path) == os.path.abspath(active_path):
+            return
+        os.remove(legacy_path)
+        for suffix in ("-wal", "-shm"):
+            sidecar = f"{legacy_path}{suffix}"
+            if os.path.exists(sidecar):
+                os.remove(sidecar)
+        logger.info("Removed legacy action DB at %s after migration.", legacy_path)
+    except Exception as exc:
+        logger.warning("Action DB migration from %s to %s failed: %s", legacy_path, target_path, exc)
+
+
 def resolve_action_db_path() -> str:
     configured_path = os.getenv("ACTION_DB_PATH", "").strip()
-    preferred_path = configured_path or os.path.join(DATA_DIR, "mod_actions.db")
+    storage_path = os.path.join(DATA_DIR, "storage", "mod_actions.db")
+    legacy_path = os.path.join(DATA_DIR, "mod_actions.db")
+    preferred_path = configured_path or storage_path
+    candidates = [preferred_path]
+    if legacy_path not in candidates:
+        candidates.append(legacy_path)
+
     fallback_root = os.path.join(tempfile.gettempdir(), "wickedyoda")
     fallback_path = os.path.join(fallback_root, "mod_actions.db")
-    candidates = [preferred_path]
-    if fallback_path != preferred_path:
+    if fallback_path not in candidates:
         candidates.append(fallback_path)
 
     for path in candidates:
@@ -2111,6 +2172,8 @@ def resolve_action_db_path() -> str:
                 conn.execute("PRAGMA user_version = 1")
                 conn.commit()
             secure_sqlite_sidecars(path)
+            if path == preferred_path:
+                _migrate_action_db(legacy_path, storage_path, path)
             if path != preferred_path:
                 logger.warning("Action DB path %s is not writable; using fallback %s", preferred_path, path)
             return path
@@ -5340,7 +5403,10 @@ class ModerationBot(commands.Bot):
         )
 
     def get_web_snapshot(self) -> dict:
-        latency_ms = max(int(self.latency * 1000), 0) if self.is_ready() else 0
+        latency = self.latency if self.is_ready() else None
+        if latency is not None and not math.isfinite(latency):
+            latency = None
+        latency_ms = max(int(latency * 1000), 0) if latency else 0
         managed = self.get_managed_guilds()
         invite_url = ""
         if self.user is not None:

@@ -1,0 +1,15 @@
+services:
+  watchtower-gui:
+    container_name: watchtower-gui
+    build:
+      context: ..
+      dockerfile: watchtower-gui/Dockerfile
+    ports:
+      - "8555:5000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - GUI_PASSWORD=${WATCHTOWER_GUI_PASSWORD}
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      - WATCHTOWER_SCHEDULE=${WATCHTOWER_SCHEDULE:-0 */6 * * *}
+    restart: unless-stopped

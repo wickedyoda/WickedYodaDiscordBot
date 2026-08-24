@@ -1,8 +1,10 @@
 import hashlib
 import io
+import ipaddress
 import json
 import logging
 import os
+import re
 import secrets
 import smtplib
 import sqlite3
@@ -16,11 +18,19 @@ from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from functools import wraps
 from pathlib import Path
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 from flask import Flask, flash, redirect, render_template_string, request, send_file, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from app.uptime_kuma_admin import (
+    UptimeKumaAdminError,
+    add_monitor,
+    is_uptime_kuma_admin_enabled,
+    list_monitors,
+    remove_monitor,
+    update_monitor,
+)
 from webui.constants import (
     AUTH_MODE_REMEMBER,
     AUTH_MODE_STANDARD,
@@ -138,6 +148,25 @@ def _normalize_wordpress_source(raw_value: str) -> str:
     return normalized.rstrip("/") if normalized != f"{parsed.scheme}://{parsed.netloc}/" else normalized
 
 
+def _is_blocked_ip_address(host: str) -> bool:
+    """Return True if host is localhost, private, link-local, loopback, reserved, multicast, or unspecified."""
+    hostname = (host or "").strip().lower()
+    if not hostname or hostname in {"localhost", "::1", "ip6-localhost"} or hostname.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
 def _normalize_monitor_target(raw_value: str, monitor_type: str) -> str:
     candidate = str(raw_value or "").strip()
     if not candidate:
@@ -148,6 +177,8 @@ def _normalize_monitor_target(raw_value: str, monitor_type: str) -> str:
         parsed = urlparse(candidate)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("HTTP monitor target must be a valid http(s) URL.")
+        if _is_blocked_ip_address(parsed.hostname or ""):
+            raise ValueError("Monitor target must not point to a private or internal address.")
         return urlunparse(parsed)
     if monitor_type == "statuspage":
         if "://" not in candidate:
@@ -155,6 +186,8 @@ def _normalize_monitor_target(raw_value: str, monitor_type: str) -> str:
         parsed = urlparse(candidate)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("Status page URL must be a valid http(s) URL.")
+        if _is_blocked_ip_address(parsed.hostname or ""):
+            raise ValueError("Monitor target must not point to a private or internal address.")
         path = parsed.path.rstrip("/")
         if not path.endswith("/api/v2/status.json"):
             path = f"{path}/api/v2/status.json" if path else "/api/v2/status.json"
@@ -169,6 +202,8 @@ def _normalize_monitor_target(raw_value: str, monitor_type: str) -> str:
         host, port_text = candidate.rsplit(":", 1)
         if not host.strip():
             raise ValueError("TCP target must include a host.")
+        if _is_blocked_ip_address(host.strip()):
+            raise ValueError("TCP target must not point to a private or internal address.")
         if not port_text.strip().isdigit():
             raise ValueError("TCP target port must be numeric.")
         port = int(port_text.strip())
@@ -1058,6 +1093,98 @@ def _write_env_file(path: Path, updates: dict[str, str]) -> None:
     lines.extend(f"{key}={existing[key]}" for key in extra_keys)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     _apply_best_effort_permissions(path, 0o600)
+
+
+def _persist_env_updates(updates: dict[str, str]):
+    """Persist env updates to the env file. Returns (ok, error_text)."""
+    env_path = _resolve_env_file_path()
+    existing = _read_env_file(env_path)
+    existing.update(updates)
+    _ensure_private_directory(env_path.parent)
+    _write_env_file(env_path, existing)
+    for key, value in updates.items():
+        os.environ[str(key)] = "" if value is None else str(value)
+    return True, ""
+
+
+def _load_uptime_kuma_page_state() -> dict:
+    """Load Uptime Kuma configuration from env values."""
+    env_values = _read_env_file(_resolve_env_file_path())
+    instance_url = str(env_values.get("UPTIME_KUMA_BASE_URL") or os.getenv("UPTIME_KUMA_BASE_URL", "") or "").strip()
+    api_key = str(env_values.get("UPTIME_KUMA_API_KEY") or os.getenv("UPTIME_KUMA_API_KEY", "") or "").strip()
+    try:
+        timeout = max(3, int(env_values.get("UPTIME_KUMA_TIMEOUT_SECONDS") or os.getenv("UPTIME_KUMA_TIMEOUT_SECONDS", "30")))
+    except (ValueError, TypeError):
+        timeout = 30
+    verify_tls = str(env_values.get("UPTIME_KUMA_VERIFY_TLS", "true")).strip().lower() in {"1", "true", "yes", "on"}
+    return {
+        "instance_url": instance_url,
+        "api_key": api_key,
+        "timeout": timeout,
+        "verify_tls": verify_tls,
+    }
+
+
+def _safe_list_kuma_monitors(page_state: dict) -> list[dict]:
+    """Safely list monitors, returning empty list on error."""
+    if not page_state.get("instance_url") or not page_state.get("api_key"):
+        return []
+    try:
+        return list_monitors(
+            instance_url=page_state["instance_url"],
+            api_key=page_state["api_key"],
+            timeout=page_state.get("timeout", 30),
+            verify_tls=page_state.get("verify_tls", True),
+        )
+    except Exception:
+        return []
+
+
+def _normalize_kuma_timeout(raw_value: str | int | None, default: int = 30) -> int:
+    allowed = {8, 15, 30, 60, 90, 120}
+    if isinstance(raw_value, int):
+        return raw_value if raw_value in allowed else default
+    candidate = str(raw_value or "").strip()
+    if candidate.isdigit():
+        parsed = int(candidate)
+        if parsed in allowed or parsed >= 3:
+            return max(3, parsed)
+    return default
+
+
+def _normalize_kuma_monitor_payload(form) -> dict:
+    """Extract and normalize monitor fields from a form submission."""
+    get = form.get
+    name = str(get("monitor_name", "") or "").strip()
+    monitor_type = str(get("monitor_type", "http") or "http").strip().lower() or "http"
+    url = str(get("monitor_url", "") or "").strip()
+    hostname = str(get("monitor_hostname", "") or "").strip()
+    port = str(get("monitor_port", "") or "").strip()
+    method = str(get("monitor_method", "GET") or "GET").strip().upper() or "GET"
+    path = str(get("monitor_path", "/") or "/").strip() or "/"
+    interval = int(get("monitor_interval", "60") or 60) or 60
+    timeout = int(get("monitor_timeout", "30") or 30) or 30
+    active = str(get("monitor_active", "true") or "").strip().lower() in {"1", "true", "yes", "on"}
+    notify = str(get("monitor_notify", "true") or "").strip().lower() in {"1", "true", "yes", "on"}
+    ignore_ssl = str(get("monitor_ignore_ssl", "false") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    payload = {
+        "name": name,
+        "type": monitor_type,
+        "url": url,
+        "method": method,
+        "active": active,
+        "notify": notify,
+        "ignoreSsl": ignore_ssl,
+        "interval": interval,
+        "timeout": timeout,
+        "path": path,
+    }
+    if hostname:
+        payload["hostname"] = hostname
+    if port:
+        payload["port"] = port
+    return payload
 
 
 def _build_settings_fields(channel_options: list[dict] | None = None) -> list[dict]:
@@ -3374,6 +3501,283 @@ def create_app(
         else:
             flash("Monitor not found.", "warning")
         return redirect(url_for("uptime_monitors_page"))
+
+    # --- Uptime Kuma admin integration ---
+    # Allows control of a local Docker Uptime Kuma instance:
+    # list, add, edit, and delete monitors via the Kuma REST API.
+    # Config asks user for: host/URL, port, and API key.
+
+    @app.get("/admin/uptime-kuma")
+    @login_required
+    def uptime_kuma_page():
+        selected_guild_id, _, _ = _selected_guild_context()
+        page_state = _load_uptime_kuma_page_state()
+        if request.method == "GET":
+            action = str(request.args.get("action", "list")).strip().lower()
+        else:
+            action = str(request.form.get("action", "list")).strip().lower()
+
+        instance_url = str(page_state.get("instance_url", "")).strip()
+        api_key = str(page_state.get("api_key", "")).strip()
+        kuma_enabled = is_uptime_kuma_admin_enabled()
+
+        kuma_monitors = []
+        kuma_error = page_state.get("kuma_error", "")
+        if kuma_enabled and instance_url and api_key and action == "list":
+            try:
+                kuma_monitors = list_monitors(
+                    instance_url=instance_url,
+                    api_key=api_key,
+                    timeout=page_state.get("timeout", 30),
+                    verify_tls=page_state.get("verify_tls", True),
+                )
+            except UptimeKumaAdminError as exc:
+                kuma_error = str(exc)
+            except Exception as exc:
+                kuma_error = f"Failed to list monitors: {exc}"
+
+        return _render_page(
+            "uptime_kuma",
+            "Uptime Kuma",
+            kuma_enabled=kuma_enabled,
+            instance_url=instance_url,
+            api_key_configured=bool(api_key),
+            kuma_admin_proxy_enabled=os.getenv("UPTIME_KUMA_ADMIN_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
+            kuma_monitors=kuma_monitors,
+            kuma_error=kuma_error,
+            timeout_options=list(UPTIME_MONITOR_TIMEOUT_OPTIONS),
+        )
+
+    @app.post("/admin/uptime-kuma/settings")
+    @login_required
+    def uptime_kuma_settings():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("uptime_kuma_page")
+        instance_url = str(request.form.get("instance_url", "")).strip()
+        api_key = str(request.form.get("api_key", "")).strip()
+        api_key_clear = str(request.form.get("api_key_clear", "")).strip().lower()
+        timeout_seconds = _normalize_kuma_timeout(request.form.get("timeout_seconds", "30"))
+        verify_tls = str(request.form.get("verify_tls", "true")).strip().lower() in {"1", "true", "yes", "on"}
+        admin_proxy_enabled = str(request.form.get("uptime_kuma_admin_enabled", "")).strip().lower() in {"1", "true", "yes", "on"}
+        updates = {
+            "UPTIME_KUMA_ENABLED": "true" if instance_url else "false",
+            "UPTIME_KUMA_BASE_URL": instance_url,
+            "UPTIME_KUMA_API_KEY": api_key,
+            "UPTIME_KUMA_TIMEOUT_SECONDS": str(timeout_seconds),
+            "UPTIME_KUMA_VERIFY_TLS": "true" if verify_tls else "false",
+            "UPTIME_KUMA_ADMIN_ENABLED": "true" if admin_proxy_enabled else "false",
+        }
+        if api_key_clear in {"1", "true", "yes", "on"}:
+            updates["UPTIME_KUMA_API_KEY"] = ""
+        ok, error_text = _persist_env_updates(updates)
+        if ok:
+            flash("Uptime Kuma settings saved.", "success")
+        else:
+            flash(error_text, "error")
+        return redirect(url_for("uptime_kuma_page"))
+
+    @app.get("/admin/uptime-kuma/monitors/add")
+    @login_required
+    def uptime_kuma_add_monitor_form():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("uptime_kuma_page")
+        page_state = _load_uptime_kuma_page_state()
+        return _render_page(
+            "uptime_kuma_monitor_form",
+            "Add Uptime Kuma Monitor",
+            mode="add",
+            instance_url=page_state.get("instance_url", ""),
+            api_key_configured=bool(page_state.get("api_key", "")),
+            monitor={},
+            timeout_options=list(UPTIME_MONITOR_TIMEOUT_OPTIONS),
+        )
+
+    @app.post("/admin/uptime-kuma/monitors/add")
+    @login_required
+    def uptime_kuma_add_monitor():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("uptime_kuma_page")
+        page_state = _load_uptime_kuma_page_state()
+        monitor_payload = _normalize_kuma_monitor_payload(request.form)
+        try:
+            add_monitor(
+                instance_url=page_state["instance_url"],
+                api_key=page_state["api_key"],
+                monitor=monitor_payload,
+                timeout=page_state.get("timeout", 30),
+                verify_tls=page_state.get("verify_tls", True),
+            )
+            flash("Monitor added to Uptime Kuma.", "success")
+        except (UptimeKumaAdminError, Exception) as exc:
+            flash(f"Failed to add monitor: {exc}", "error")
+        return redirect(url_for("uptime_kuma_page"))
+
+    @app.get("/admin/uptime-kuma/monitors/<monitor_id>/edit")
+    @login_required
+    def uptime_kuma_edit_monitor_form(monitor_id: str):
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("uptime_kuma_page")
+        page_state = _load_uptime_kuma_page_state()
+        monitors = _safe_list_kuma_monitors(page_state)
+        monitor = next((m for m in monitors if str(m.get("id")) == str(monitor_id)), {})
+        return _render_page(
+            "uptime_kuma_monitor_form",
+            "Edit Uptime Kuma Monitor",
+            mode="edit",
+            monitor_id=monitor_id,
+            instance_url=page_state.get("instance_url", ""),
+            api_key_configured=bool(page_state.get("api_key", "")),
+            monitor=monitor,
+            timeout_options=list(UPTIME_MONITOR_TIMEOUT_OPTIONS),
+        )
+
+    @app.post("/admin/uptime-kuma/monitors/<monitor_id>/edit")
+    @login_required
+    def uptime_kuma_edit_monitor(monitor_id: str):
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("uptime_kuma_page")
+        page_state = _load_uptime_kuma_page_state()
+        monitor_payload = _normalize_kuma_monitor_payload(request.form)
+        try:
+            update_monitor(
+                instance_url=page_state["instance_url"],
+                api_key=page_state["api_key"],
+                monitor_id=monitor_id,
+                monitor=monitor_payload,
+                timeout=page_state.get("timeout", 30),
+                verify_tls=page_state.get("verify_tls", True),
+            )
+            flash("Monitor updated in Uptime Kuma.", "success")
+        except (UptimeKumaAdminError, Exception) as exc:
+            flash(f"Failed to update monitor: {exc}", "error")
+        return redirect(url_for("uptime_kuma_page"))
+
+    @app.post("/admin/uptime-kuma/monitors/<monitor_id>/delete")
+    @login_required
+    def uptime_kuma_delete_monitor(monitor_id: str):
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("uptime_kuma_page")
+        page_state = _load_uptime_kuma_page_state()
+        try:
+            remove_monitor(
+                instance_url=page_state["instance_url"],
+                api_key=page_state["api_key"],
+                monitor_id=monitor_id,
+                timeout=page_state.get("timeout", 30),
+                verify_tls=page_state.get("verify_tls", True),
+            )
+            flash("Monitor removed from Uptime Kuma.", "success")
+        except (UptimeKumaAdminError, Exception) as exc:
+            flash(f"Failed to remove monitor: {exc}", "error")
+        return redirect(url_for("uptime_kuma_page"))
+
+    @app.post("/admin/uptime-kuma/refresh")
+    @login_required
+    def uptime_kuma_refresh():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("uptime_kuma_page")
+        return redirect(url_for("uptime_kuma_page"))
+
+    @app.route("/admin/uptime-kuma/proxy/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
+    @login_required
+    def uptime_kuma_proxy(subpath: str):
+        """Reverse proxy to the authenticated Uptime Kuma web UI.
+
+        Forwards the request to the instance configured by UPTIME_KUMA_BASE_URL
+        and requires UPTIME_KUMA_ADMIN_ENABLED=true.
+        Only logged-in admin web users can reach this proxy.
+        """
+        user = _current_user()
+        if not user or not user.get("is_admin"):
+            return "Forbidden", 403
+
+        kuma_proxy_enabled = os.getenv("UPTIME_KUMA_ADMIN_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+        if not kuma_proxy_enabled:
+            return "Uptime Kuma admin proxy is not enabled.", 404
+
+        page_state = _load_uptime_kuma_page_state()
+        instance_url = str(page_state.get("instance_url", "")).strip()
+        if not instance_url:
+            return "UPTIME_KUMA_BASE_URL is not configured.", 502
+
+        # Strict whitelist to prevent URL injection / reflected XSS / SSRF
+        if not re.match(r"^[a-zA-Z0-9._/\-]+$", subpath):
+            return "Invalid path segment in proxy request.", 400
+
+        import requests
+
+        base = instance_url.rstrip("/") + "/"
+        safe_subpath = subpath.replace("..", "").lstrip("/")
+        safe_subpath = re.sub(r"^[a-zA-Z]+://", "", safe_subpath)
+        target_url = urljoin(base, safe_subpath)
+
+        headers = {}
+        for key, value in request.headers.items():
+            if key.lower() in {"host", "content-length", "content-encoding"}:
+                continue
+            headers[key] = value
+
+        body = request.get_data()
+        verify_tls = page_state.get("verify_tls", True)
+        try:
+            resp = requests.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                data=body if body else None,
+                params=request.args,
+                cookies=request.cookies,
+                allow_redirects=False,
+                verify=verify_tls,
+                timeout=30,
+            )
+        except requests.RequestException:
+            logging.getLogger("wickedyoda-web-admin").warning("Uptime Kuma proxy error for %s", target_url)
+            return "Uptime Kuma proxy error.", 502
+
+        def _proxy_body():
+            try:
+                yield from resp.raw.stream(8192, decode_content=False)
+            except Exception:
+                logging.getLogger("wickedyoda-web-admin").exception("Error streaming upstream response for %s", target_url)
+
+        response_body = _proxy_body()
+        excluded_headers = {
+            "content-encoding",
+            "content-length",
+            "transfer-encoding",
+            "connection",
+        }
+        response_headers = []
+        for key, value in resp.raw.headers.items():
+            if key.lower() not in excluded_headers:
+                response_headers.append((key, value))
+
+        location = resp.headers.get("Location", "")
+        if location:
+            parsed = urlparse(location)
+            if parsed.scheme and parsed.netloc:
+                new_location = f"/admin/uptime-kuma/proxy{parsed.path}"
+                if parsed.query:
+                    new_location += f"?{parsed.query}"
+                response_headers.append(("Location", new_location))
+            else:
+                if not parsed.scheme or parsed.scheme in {"http", "https"}:
+                    response_headers.append(("Location", location))
+                else:
+                    response_headers.append(("Location", "/admin/uptime-kuma/proxy/"))
+
+        response_headers.append(("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'"))
+        response_headers.append(("X-Content-Type-Options", "nosniff"))
+        response_headers.append(("X-Frame-Options", "DENY"))
+
+        from flask import Response
+        return Response(
+            response_body,
+            status=resp.status_code,
+            headers=response_headers,
+            mimetype=resp.headers.get("Content-Type", "application/octet-stream"),
+        )
 
     @app.get("/admin/observability")
     @admin_required
