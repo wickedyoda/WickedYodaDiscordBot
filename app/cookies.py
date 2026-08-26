@@ -68,14 +68,8 @@ class CookieStore:
                     )
                     """
                 )
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_cookie_tx_guild_user"
-                    " ON cookie_transactions(guild_id, user_id)"
-                )
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_cookie_daily_guild_user"
-                    " ON cookie_daily_claims(guild_id, user_id)"
-                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_cookie_tx_guild_user ON cookie_transactions(guild_id, user_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_cookie_daily_guild_user ON cookie_daily_claims(guild_id, user_id)")
                 conn.commit()
 
     def _now(self) -> str:
@@ -120,8 +114,7 @@ class CookieStore:
                     (int(guild_id), int(user_id), int(delta), now),
                 )
                 conn.execute(
-                    "INSERT INTO cookie_transactions (guild_id, user_id, amount, source, created_at)"
-                    " VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO cookie_transactions (guild_id, user_id, amount, source, created_at) VALUES (?, ?, ?, ?, ?)",
                     (int(guild_id), int(user_id), int(delta), source, now),
                 )
                 conn.commit()
@@ -201,7 +194,4 @@ class CookieStore:
                     """,
                     (int(guild_id), int(user_id), int(limit)),
                 ).fetchall()
-                return [
-                    {"amount": int(r["amount"]), "source": r["source"], "created_at": r["created_at"]}
-                    for r in rows
-                ]
+                return [{"amount": int(r["amount"]), "source": r["source"], "created_at": r["created_at"]} for r in rows]

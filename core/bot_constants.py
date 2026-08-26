@@ -155,8 +155,16 @@ COMMAND_PERMISSION_METADATA: dict[str, dict[str, str]] = {
     "daily": {"label": "/daily", "description": "Claim daily cookies", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
     "gift": {"label": "/gift", "description": "Gift cookies to a user", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
     "gamble": {"label": "/gamble", "description": "Gamble cookies", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
-    "achievements": {"label": "/achievements", "description": "View your badges", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
-    "achievements_leaderboard": {"label": "/achievements leaderboard", "description": "Achievement leaderboard", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
+    "achievements": {
+        "label": "/achievements",
+        "description": "View your badges",
+        "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC,
+    },
+    "achievements_leaderboard": {
+        "label": "/achievements leaderboard",
+        "description": "Achievement leaderboard",
+        "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC,
+    },
     "quote": {"label": "/quote", "description": "Random quote", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
     "fact": {"label": "/fact", "description": "Random fact", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC},
 }
