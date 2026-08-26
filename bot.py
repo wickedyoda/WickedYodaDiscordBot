@@ -10,6 +10,7 @@ import logging
 import logging.handlers
 import math
 import os
+import random
 import re
 import secrets
 import shutil
@@ -29,6 +30,16 @@ from defusedxml import ElementTree as DefusedET
 from discord import app_commands
 from discord.ext import commands
 
+from app.achievements import ACHIEVEMENTS, AchievementStore
+from app.cookies import CookieStore
+from app.fun_data import (
+    COMPLIMENTS_EXTENDED,
+    PLAYFUL_ROASTS_EXTENDED,
+    QUESTION_OF_THE_DAY_EXTENDED,
+    WOULD_YOU_RATHER_EXTENDED,
+    YODA_WISDOM_EXTENDED,
+)
+from app.interactive_games import GuessTheNumberView, RockPaperScissorsView, TriviaView
 from core.bot_constants import (
     COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR,
     COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC,
@@ -376,6 +387,7 @@ PLAYFUL_ROASTS = (
     "You bring strong 'forgot the semicolon' energy.",
     "You're proof that chaos can be a personality trait.",
     "Your browser tabs have started filing complaints.",
+    *PLAYFUL_ROASTS_EXTENDED,
 )
 COMPLIMENTS = (
     "You make the server better just by being active in it.",
@@ -383,6 +395,7 @@ COMPLIMENTS = (
     "Your timing is better than most deployment windows.",
     "You consistently bring good vibes and useful chaos.",
     "You seem like the person who actually reads the pinned messages.",
+    *COMPLIMENTS_EXTENDED,
 )
 YODA_WISDOM_LINES = (
     "Patience you need; rushed commands, buggy results make.",
@@ -390,6 +403,7 @@ YODA_WISDOM_LINES = (
     "Do, or do not. There is no 'I forgot to check the logs.'",
     "Calm your mind. Then fix the root cause.",
     "Strong with the helper you are, when kindness and moderation balance.",
+    *YODA_WISDOM_EXTENDED,
 )
 QUESTION_OF_THE_DAY_PROMPTS = (
     "What small thing made your day better this week?",
@@ -397,6 +411,7 @@ QUESTION_OF_THE_DAY_PROMPTS = (
     "What is one app or tool you use more than anything else?",
     "What fictional world would you visit for a day?",
     "What is the most underrated comfort food?",
+    *QUESTION_OF_THE_DAY_EXTENDED,
 )
 WOULD_YOU_RATHER_PROMPTS = (
     "Would you rather always be 10 minutes early or always have perfect Wi-Fi?",
@@ -404,6 +419,7 @@ WOULD_YOU_RATHER_PROMPTS = (
     "Would you rather have unlimited snacks or unlimited battery life?",
     "Would you rather win every argument or never lose your keys again?",
     "Would you rather always know the best meme for the moment or the perfect song?",
+    *WOULD_YOU_RATHER_EXTENDED,
 )
 TRIVIA_QUESTIONS = (
     {
@@ -4044,6 +4060,8 @@ LOG_DIR = resolve_log_dir(ACTION_DB_PATH)
 BOT_LOG_FILE, BOT_CHANNEL_LOG_FILE, CONTAINER_ERROR_LOG_FILE = configure_runtime_logging(LOG_DIR)
 write_startup_log_files(LOG_DIR, [BOT_LOG_FILE, BOT_CHANNEL_LOG_FILE, CONTAINER_ERROR_LOG_FILE])
 ACTION_STORE = ActionStore(ACTION_DB_PATH)
+COOKIE_STORE = CookieStore(ACTION_DB_PATH)
+ACHIEVEMENT_STORE = AchievementStore(ACTION_DB_PATH)
 
 
 async def resolve_member_activity_members_async(guild_id: int, user_ids: list[int]) -> dict[int, discord.Member]:
@@ -6532,6 +6550,8 @@ async def roastme(interaction: discord.Interaction, target: discord.Member | Non
     line = secure_choice(PLAYFUL_ROASTS)
     await interaction.response.send_message(f"{selected_target.mention}: {line}", ephemeral=COMMAND_RESPONSES_EPHEMERAL)
     await log_interaction(interaction, action="roastme", target=selected_target, reason=truncate_log_text(line), success=True)
+    if interaction.guild and interaction.user.id != selected_target.id:
+        _record_fun_achievement(interaction, "roast_used")
 
 
 @bot.tree.command(name="compliment", description="Send a friendly compliment.")
@@ -6552,6 +6572,15 @@ async def wisdom(interaction: discord.Interaction) -> None:
     line = secure_choice(YODA_WISDOM_LINES)
     await interaction.response.send_message(line, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
     await log_interaction(interaction, action="wisdom", reason=truncate_log_text(line), success=True)
+    if interaction.guild and not interaction.user.bot:
+        unlocked = ACHIEVEMENT_STORE.record_event(interaction.guild.id, interaction.user.id, "wisdom_asked")
+        if unlocked:
+            for key in unlocked:
+                ach = ACHIEVEMENTS.get(key, {})
+                await interaction.followup.send(
+                    f"🏆 **Achievement Unlocked: {ach.get('emoji', '🏅')} {ach.get('title', key)}** — {ach.get('description', '')}",
+                    ephemeral=True,
+                )
 
 
 @bot.tree.command(name="gif", description="Post a reaction GIF.")
@@ -6942,19 +6971,45 @@ async def leaderboard(interaction: discord.Interaction, window: app_commands.Cho
     await log_interaction(interaction, action="leaderboard", reason=selected_window, success=True)
 
 
-@bot.tree.command(name="trivia", description="Get a random trivia question.")
+@bot.tree.command(name="trivia", description="Play interactive trivia with buttons!")
 async def trivia(interaction: discord.Interaction) -> None:
     if not await ensure_interaction_command_access(interaction, "trivia"):
         return
     selected = secure_choice(TRIVIA_QUESTIONS)
-    choices = selected["choices"]
-    lines = ["**Trivia Time**", selected["question"], ""]
-    for index, choice in enumerate(choices):
-        lines.append(f"{NUMBER_EMOJIS[index]} {choice}")
-    lines.append("")
-    lines.append(f"Answer: ||{selected['answer']}||")
-    await interaction.response.send_message("\n".join(lines), ephemeral=COMMAND_RESPONSES_EPHEMERAL)
-    await log_interaction(interaction, action="trivia", reason=truncate_log_text(selected["question"]), success=True)
+    question = selected["question"]
+    choices = list(selected["choices"])
+    correct_answer = selected["answer"]
+    correct_index = 0
+    for i, choice in enumerate(choices):
+        if choice == correct_answer:
+            correct_index = i
+            break
+    paired = list(enumerate(choices))
+    random.shuffle(paired)  # nosec B311
+    shuffled_choices = [c for _, c in paired]
+    shuffled_correct_index = 0
+    for new_i, (_, orig_idx) in enumerate(paired):
+        if orig_idx == correct_index:
+            shuffled_correct_index = new_i
+            break
+    view = TriviaView(
+        question=question,
+        choices=shuffled_choices,
+        correct_index=shuffled_correct_index,
+        guild_id=int(interaction.guild.id) if interaction.guild else 0,
+        cookie_store=COOKIE_STORE,
+        timeout=60.0,
+    )
+    embed = discord.Embed(
+        title="🧠 Trivia Challenge",
+        description=f"**{question}**\n\nTap a button to answer! First correct gets 5 cookies. 60s timeout.",
+        color=discord.Color.blue(),
+    )
+    await interaction.response.send_message(embed=embed, view=view)
+    await log_interaction(interaction, action="trivia", reason=truncate_log_text(question), success=True)
+    unlocked = _record_fun_achievement(interaction, "trivia_played")
+    if unlocked:
+        await _announce_achievements(interaction, unlocked)
 
 
 @bot.tree.command(name="wouldyourather", description="Get a would-you-rather prompt.")
@@ -6966,35 +7021,37 @@ async def wouldyourather(interaction: discord.Interaction) -> None:
     await log_interaction(interaction, action="wouldyourather", reason=truncate_log_text(prompt), success=True)
 
 
-@bot.tree.command(name="rps", description="Play rock paper scissors against the bot.")
-@app_commands.describe(choice="Your choice")
-@app_commands.choices(
-    choice=[
-        app_commands.Choice(name="Rock", value="rock"),
-        app_commands.Choice(name="Paper", value="paper"),
-        app_commands.Choice(name="Scissors", value="scissors"),
-    ]
-)
-async def rps(interaction: discord.Interaction, choice: app_commands.Choice[str]) -> None:
+@bot.tree.command(name="rps", description="Play rock paper scissors with buttons!")
+@app_commands.describe(challenge="Optional: challenge a specific user")
+async def rps(
+    interaction: discord.Interaction, challenge: discord.Member | None = None
+) -> None:
     if not await ensure_interaction_command_access(interaction, "rps"):
         return
-    user_choice = choice.value
-    bot_choice = secure_choice(sorted(RPS_BEATS))
-    if bot_choice == user_choice:
-        outcome = "It's a tie."
-    elif RPS_BEATS[user_choice] == bot_choice:
-        outcome = "You win."
-    else:
-        outcome = "I win."
-    await interaction.response.send_message(
-        f"You picked **{user_choice}**. I picked **{bot_choice}**. {outcome}",
-        ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+    if not interaction.guild:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    if challenge and challenge.id == interaction.user.id:
+        await reply_ephemeral(interaction, "You can't challenge yourself!")
+        return
+    if challenge and challenge.bot:
+        await reply_ephemeral(interaction, "You can't challenge bots!")
+        return
+    view = RockPaperScissorsView(challenger_id=interaction.user.id, timeout=60.0)
+    target_text = f"challenging {challenge.mention}" if challenge else "against the bot"
+    embed = discord.Embed(
+        title="✊📄✂️ Rock Paper Scissors",
+        description=f"{interaction.user.mention} is playing {target_text}! Pick your move below. (60s timeout)",
+        color=discord.Color.blurple(),
     )
-    await log_interaction(interaction, action="rps", reason=f"{user_choice}/{bot_choice}", success=True)
+    await interaction.response.send_message(embed=embed, view=view)
+    await log_interaction(interaction, action="rps", target=challenge, success=True)
+    unlocked = _record_fun_achievement(interaction, "rps_played")
+    if unlocked:
+        await _announce_achievements(interaction, unlocked)
 
 
-@bot.tree.command(name="guess", description="Play the guild guessing game.")
-@app_commands.describe(number="Guess a number between 1 and 100")
+@bot.tree.command(name="guess", description="Play the number guessing game with buttons!")
 async def guess(interaction: discord.Interaction, number: int | None = None) -> None:
     if not await ensure_interaction_command_access(interaction, "guess"):
         return
@@ -7016,29 +7073,29 @@ async def guess(interaction: discord.Interaction, number: int | None = None) -> 
         await log_interaction(interaction, action="guess", reason="game init failed", success=False)
         return
     if number is None:
-        await interaction.response.send_message(
-            "I picked a number between **1** and **100**. Use `/guess number:<value>` to make a guess.",
-            ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+        view = GuessTheNumberView(timeout=120.0)
+        embed = discord.Embed(
+            title="🔢 Guess The Number",
+            description=f"I picked a number between **1** and **100**. Click a button to guess the range!\n\nEach button checks a range — if your number is in that range, you win!\n\nStarted by {interaction.user.mention}",
+            color=discord.Color.gold(),
         )
-        await log_interaction(interaction, action="guess", reason="game prompt", success=True)
+        await interaction.response.send_message(embed=embed, view=view)
+        await log_interaction(interaction, action="guess", reason="game prompt with buttons", success=True)
         return
     target_number = int(game.get("target_number", 0) or 0)
     attempts = int(game.get("attempt_count", 0) or 0) + 1
     if int(number) == target_number:
         ACTION_STORE.clear_guess_game(guild_id)
-        await interaction.response.send_message(
-            f"Correct. The number was **{target_number}**. Solved in {attempts} attempt(s). Starting a fresh game now.",
-            ephemeral=COMMAND_RESPONSES_EPHEMERAL,
-        )
+        await interaction.response.send_message(f"🎉 **Correct!** The number was **{target_number}**. Solved in {attempts} attempt(s).", ephemeral=COMMAND_RESPONSES_EPHEMERAL)
         ACTION_STORE.save_guess_game(guild_id, secure_randint(1, 100), interaction.user.id, attempt_count=0)
         await log_interaction(interaction, action="guess", reason=f"solved in {attempts}", success=True)
+        unlocked = ACHIEVEMENT_STORE.record_event(interaction.guild.id, interaction.user.id, "guess_win")
+        if unlocked:
+            await _announce_achievements(interaction, unlocked)
         return
     ACTION_STORE.update_guess_game_attempts(guild_id, attempts)
     hint = "higher" if int(number) < target_number else "lower"
-    await interaction.response.send_message(
-        f"Not it. Try **{hint}**. Attempts so far: {attempts}.",
-        ephemeral=COMMAND_RESPONSES_EPHEMERAL,
-    )
+    await interaction.response.send_message(f"📈 Not it. Try **{hint}**. Attempts so far: {attempts}.", ephemeral=COMMAND_RESPONSES_EPHEMERAL)
     await log_interaction(interaction, action="guess", reason=f"{number} -> {hint}", success=True)
 
 
@@ -7363,6 +7420,328 @@ async def help_command(interaction: discord.Interaction) -> None:
     )
     await interaction.response.send_message(message, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
     await log_interaction(interaction, action="help", success=True)
+
+
+def _record_fun_achievement(
+    interaction: discord.Interaction, trigger: str, increment: int = 1
+) -> list[str] | None:
+    """Record a fun command achievement event and return unlocked achievement keys (or None)."""
+    if interaction.guild and not interaction.user.bot:
+        try:
+            return ACHIEVEMENT_STORE.record_event(
+                interaction.guild.id, interaction.user.id, trigger, increment
+            )
+        except Exception:
+            logger.exception("Failed to record achievement event: %s", trigger)
+    return None
+
+
+async def _announce_achievements(
+    interaction: discord.Interaction, unlocked: list[str] | None
+) -> None:
+    """Post ephemeral achievement-unlock announcements."""
+    if not unlocked:
+        return
+    for key in unlocked:
+        ach = ACHIEVEMENTS.get(key, {})
+        try:
+            await interaction.followup.send(
+                f"🏅 **Achievement Unlocked: {ach.get('emoji', '🏆')} {ach.get('title', key)}** — {ach.get('description', '')}",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+
+
+@bot.tree.command(name="balance", description="Check your cookie balance.")
+async def balance(interaction: discord.Interaction) -> None:
+    if not await ensure_interaction_command_access(interaction, "balance"):
+        return
+    if not interaction.guild:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    bal = COOKIE_STORE.get_balance(interaction.guild.id, interaction.user.id)
+    embed = discord.Embed(
+        title="🍪 Cookie Balance",
+        description=f"**{interaction.user.display_name}**: {bal} cookies 🍪",
+        color=discord.Color.gold(),
+    )
+    top_users = COOKIE_STORE.get_top_balances(interaction.guild.id, limit=5)
+    if top_users:
+        leaderboard_lines = []
+        for rank, u in enumerate(top_users, 1):
+            medal = ["🥇", "🥈", "🥉", "🏅", "🏅"][rank - 1] if rank <= 5 else "  "
+            line = f"{medal} <@{u['user_id']}> — {u['balance']} 🍪"
+            leaderboard_lines.append(line)
+        embed.add_field(name="Top 5", value="\n".join(leaderboard_lines), inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+    await log_interaction(interaction, action="balance", success=True)
+
+
+@bot.tree.command(name="daily", description="Claim your daily cookies!")
+async def daily(interaction: discord.Interaction) -> None:
+    if not await ensure_interaction_command_access(interaction, "daily"):
+        return
+    if not interaction.guild:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    daily_amount = env_int("DAILY_COOKIE_AMOUNT", 25)
+    new_balance = COOKIE_STORE.claim_daily(interaction.guild.id, interaction.user.id, daily_amount)
+    if new_balance == -1:
+        await reply_ephemeral(interaction, "You've already claimed your daily cookies! Come back tomorrow. 🕐")
+        await log_interaction(interaction, action="daily", reason="already claimed", success=False)
+        return
+    await interaction.response.send_message(f"🎁 **+{daily_amount} cookies!** Your new balance is **{new_balance}** 🍪", ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+    await log_interaction(interaction, action="daily", success=True)
+    # Check cookie balance achievements
+    unlocked = ACHIEVEMENT_STORE.set_cookie_balance(interaction.guild.id, interaction.user.id, new_balance)
+    if unlocked:
+        await _announce_achievements(interaction, unlocked)
+
+
+@bot.tree.command(name="gift", description="Gift cookies to another user.")
+@app_commands.describe(amount="Number of cookies to gift", target="User to gift cookies to")
+async def gift(interaction: discord.Interaction, amount: int, target: discord.Member) -> None:
+    if not await ensure_interaction_command_access(interaction, "gift"):
+        return
+    if not interaction.guild:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    if target.id == interaction.user.id:
+        await reply_ephemeral(interaction, "You can't gift cookies to yourself! 🤦")
+        return
+    if target.bot:
+        await reply_ephemeral(interaction, "You can't gift cookies to bots!")
+        return
+    if amount <= 0:
+        await reply_ephemeral(interaction, "You must gift at least 1 cookie!")
+        return
+    giver_balance = COOKIE_STORE.get_balance(interaction.guild.id, interaction.user.id)
+    if giver_balance < amount:
+        await reply_ephemeral(interaction, f"You only have **{giver_balance}** cookies — not enough! 🍪")
+        return
+    new_giver = COOKIE_STORE.remove_cookies(interaction.guild.id, interaction.user.id, amount, "gift_given")
+    new_target = COOKIE_STORE.add_cookies(interaction.guild.id, target.id, amount, "gift_received")
+    await interaction.response.send_message(
+        f"🎁 {interaction.user.mention} gifted **{amount}** cookies to {target.mention}! 🍪\n"
+        f"You now have **{new_giver}** cookies, {target.display_name} has **{new_target}**.",
+        ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+    )
+    await log_interaction(interaction, action="gift", target=target, reason=f"{amount} cookies", success=True)
+
+
+@bot.tree.command(name="gamble", description="Gamble cookies on a coin flip or RPS.")
+@app_commands.describe(
+    game="The game to gamble on",
+    amount="Number of cookies to bet",
+    choice="Your choice (for coinflip: heads/tails, for rps: rock/paper/scissors)",
+)
+@app_commands.choices(
+    game=[
+        app_commands.Choice(name="Coinflip", value="coinflip"),
+        app_commands.Choice(name="Rock Paper Scissors", value="rps"),
+    ],
+)
+async def gamble(
+    interaction: discord.Interaction,
+    game: str,
+    amount: int,
+    choice: str,
+) -> None:
+    if not await ensure_interaction_command_access(interaction, "gamble"):
+        return
+    if not interaction.guild:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    if amount <= 0:
+        await reply_ephemeral(interaction, "You must bet at least 1 cookie!")
+        return
+    balance = COOKIE_STORE.get_balance(interaction.guild.id, interaction.user.id)
+    if balance < amount:
+        await reply_ephemeral(interaction, f"You only have **{balance}** cookies — not enough! 🍪")
+        return
+    if game == "coinflip":
+        player_choice = str(choice).strip().lower()
+        if player_choice not in ("heads", "tails"):
+            await reply_ephemeral(interaction, "For coinflip, pick `heads` or `tails`!")
+            return
+        result = secure_choice(("heads", "tails"))
+        if result == player_choice:
+            new_balance = COOKIE_STORE.add_cookies(interaction.guild.id, interaction.user.id, amount * 2, "gamble_win")
+            await interaction.response.send_message(
+                f"🪙 **You won!** The coin landed **{result}** — you matched `{player_choice}`.\n"
+                f"You won **{amount * 2}** cookies! New balance: **{new_balance}** 🍪",
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+            )
+            await log_interaction(interaction, action="gamble", reason="coinflip win", success=True)
+            unlocked = _record_fun_achievement(interaction, "roast_used")  # Reuse for tracking
+        else:
+            new_balance = COOKIE_STORE.remove_cookies(interaction.guild.id, interaction.user.id, amount, "gamble_lose")
+            await interaction.response.send_message(
+                f"🪙 **The coin landed {result}** — you picked `{player_choice}`. Better luck next time!\n"
+                f"You lost **{amount}** cookies. New balance: **{new_balance}** 🍪",
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+            )
+            await log_interaction(interaction, action="gamble", reason="coinflip lose", success=False)
+    elif game == "rps":
+        player_choice = str(choice).strip().lower()
+        if player_choice not in ("rock", "paper", "scissors"):
+            await reply_ephemeral(interaction, "For RPS, pick `rock`, `paper`, or `scissors`!")
+            return
+        bot_choice = secure_choice(("rock", "paper", "scissors"))
+        beats = {"rock": "scissors", "paper": "rock", "scissors": "paper"}
+        if player_choice == bot_choice:
+            await interaction.response.send_message(
+                f"✊📄✂️ It's a **tie**! You showed **{player_choice}**, I showed **{bot_choice}**.\n"
+                f"No cookies changed hands. Balance unchanged. 🍪",
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+            )
+            await log_interaction(interaction, action="gamble", reason="rps tie", success=True)
+        elif beats[player_choice] == bot_choice:
+            new_balance = COOKIE_STORE.add_cookies(interaction.guild.id, interaction.user.id, amount * 2, "gamble_win")
+            await interaction.response.send_message(
+                f"✊📄✂️ **You win!** {player_choice.title()} beats {bot_choice}.\n"
+                f"You won **{amount * 2}** cookies! New balance: **{new_balance}** 🍪",
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+            )
+            await log_interaction(interaction, action="gamble", reason="rps win", success=True)
+            unlocked = ACHIEVEMENT_STORE.record_event(interaction.guild.id, interaction.user.id, "rps_win")
+            if unlocked:
+                await _announce_achievements(interaction, unlocked)
+        else:
+            new_balance = COOKIE_STORE.remove_cookies(interaction.guild.id, interaction.user.id, amount, "gamble_lose")
+            await interaction.response.send_message(
+                f"✊📄✂️ **I win!** {bot_choice.title()} beats {player_choice}.\n"
+                f"You lost **{amount}** cookies. New balance: **{new_balance}** 🍪",
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+            )
+            await log_interaction(interaction, action="gamble", reason="rps lose", success=False)
+    else:
+        await reply_ephemeral(interaction, f"Unknown game: {game}. Use `coinflip` or `rps`.")
+
+
+@bot.tree.command(name="achievements", description="View your achievement badges and progress.")
+@app_commands.describe(user="Optional: view another user's achievements")
+async def achievements(interaction: discord.Interaction, user: discord.Member | None = None) -> None:
+    if not await ensure_interaction_command_access(interaction, "achievements"):
+        return
+    if not interaction.guild:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    target = user or interaction.user
+    unlocked = ACHIEVEMENT_STORE.get_unlocked_achievements(interaction.guild.id, target.id)
+    progress = ACHIEVEMENT_STORE.get_achievement_progress(interaction.guild.id, target.id)
+    embed = discord.Embed(
+        title=f"🏆 {target.display_name}'s Achievements",
+        color=discord.Color.gold(),
+    )
+    if not unlocked:
+        embed.description = "No achievements unlocked yet. Start using fun commands to earn some!"
+    else:
+        lines = []
+        for a in unlocked:
+            lines.append(f"{a['emoji']} **{a['title']}** — {a['description']}")
+        embed.description = f"**{len(unlocked)} achievement(s) unlocked**\n\n" + "\n".join(lines)
+    # Show in-progress achievements (not yet unlocked but have progress)
+    in_progress = [p for p in progress if not p["unlocked"] and p["current"] > 0]
+    if in_progress:
+        in_progress.sort(key=lambda x: x["percent"], reverse=True)
+        for p in in_progress[:5]:
+            embed.add_field(
+                name=f"{p['emoji']} {p['title']} ({p['percent']}%)",
+                value=f"{p['current']}/{p['threshold']} — {p['description']}",
+                inline=False,
+            )
+    embed.set_footer(text=f"Total achievements: {len(progress)} | Unlocked: {len(unlocked)}")
+    await interaction.response.send_message(embed=embed, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+    await log_interaction(interaction, action="achievements", target=target, success=True)
+
+
+@bot.tree.command(name="achievements_leaderboard", description="Show the achievements leaderboard.")
+async def achievements_leaderboard(interaction: discord.Interaction) -> None:
+    if not await ensure_interaction_command_access(interaction, "achievements_leaderboard"):
+        return
+    if not interaction.guild:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    top = ACHIEVEMENT_STORE.get_leaderboard(interaction.guild.id, limit=10)
+    if not top:
+        await reply_ephemeral(interaction, "No achievements have been unlocked yet in this server.")
+        await log_interaction(interaction, action="achievements_leaderboard", reason="no unlocks", success=False)
+        return
+    embed = discord.Embed(
+        title="🏆 Achievement Leaderboard",
+        color=discord.Color.gold(),
+    )
+    lines = []
+    for rank, entry in enumerate(top, 1):
+        medal = ["🥇", "🥈", "🥉"][rank - 1] if rank <= 3 else "🏅"
+        user = interaction.guild.get_member(entry["user_id"])
+        name = user.display_name if user else f"User {entry['user_id']}"
+        lines.append(f"{medal} **{name}** — {entry['count']} achievement(s)")
+    embed.description = "\n".join(lines)
+    embed.set_footer(text="Top 10 by achievement count")
+    await interaction.response.send_message(embed=embed, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+    await log_interaction(interaction, action="achievements_leaderboard", success=True)
+
+
+@bot.tree.command(name="quote", description="Get a random inspirational or funny quote.")
+@app_commands.describe(category="Category of quote")
+@app_commands.choices(
+    category=[
+        app_commands.Choice(name="Random", value="random"),
+        app_commands.Choice(name="Inspirational", value="inspirational"),
+        app_commands.Choice(name="Funny", value="funny"),
+        app_commands.Choice(name="Programming", value="programming"),
+        app_commands.Choice(name="Wisdom", value="wisdom"),
+    ],
+)
+async def quote(
+    interaction: discord.Interaction,
+    category: str,
+) -> None:
+    if not await ensure_interaction_command_access(interaction, "quote"):
+        return
+    api_url = "https://api.quotable.io/random"
+    if category and category != "random":
+        api_url = f"https://api.quotable.io/random?tags={category}"
+    try:
+        payload = fetch_json_url(api_url, FUN_API_TIMEOUT_SECONDS)
+        if isinstance(payload, dict):
+            quote_text = str(payload.get("content", ""))
+            author = str(payload.get("author", "Unknown"))
+        else:
+            quote_text = "No quote found."
+            author = "Unknown"
+        embed = discord.Embed(
+            title="💭 Quote",
+            description=f"*\"{quote_text}\"*\n\n— {author}",
+            color=discord.Color.dark_purple(),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+        await log_interaction(interaction, action="quote", reason=truncate_log_text(quote_text), success=True)
+    except Exception as exc:
+        await reply_ephemeral(interaction, f"Failed to fetch a quote: {exc}")
+        await log_interaction(interaction, action="quote", reason=str(exc), success=False)
+
+
+@bot.tree.command(name="fact", description="Get a random interesting fact.")
+async def fact(interaction: discord.Interaction) -> None:
+    if not await ensure_interaction_command_access(interaction, "fact"):
+        return
+    try:
+        payload = fetch_json_url("https://uselessfacts.jsph.xyz/random.json", FUN_API_TIMEOUT_SECONDS)
+        fact_text = str(payload.get("text", "No fact found."))
+        embed = discord.Embed(
+            title="🧠 Did You Know?",
+            description=fact_text,
+            color=discord.Color.dark_blue(),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+        await log_interaction(interaction, action="fact", reason=truncate_log_text(fact_text), success=True)
+    except Exception as exc:
+        await reply_ephemeral(interaction, f"Failed to fetch a fact: {exc}")
+        await log_interaction(interaction, action="fact", reason=str(exc), success=False)
 
 
 @bot.tree.command(name="tags", description="List configured tags.")
