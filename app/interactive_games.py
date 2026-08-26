@@ -52,9 +52,7 @@ class TriviaView(discord.ui.View):
     def _make_callback(self, index: int, button: discord.ui.Button):
         async def callback(interaction: discord.Interaction) -> None:
             if self.answered:
-                await interaction.response.send_message(
-                    "This trivia question has already been answered!", ephemeral=True
-                )
+                await interaction.response.send_message("This trivia question has already been answered!", ephemeral=True)
                 return
 
             self.answered = True
@@ -77,9 +75,7 @@ class TriviaView(discord.ui.View):
             if is_correct:
                 reward = 5
                 if self.cookie_store:
-                    new_balance = self.cookie_store.add_cookies(
-                        self.guild_id, interaction.user.id, reward, "trivia_correct"
-                    )
+                    new_balance = self.cookie_store.add_cookies(self.guild_id, interaction.user.id, reward, "trivia_correct")
                 else:
                     new_balance = reward
                 content = (
@@ -89,10 +85,7 @@ class TriviaView(discord.ui.View):
                 )
             else:
                 wrong_answer = self.choices[index]
-                content = (
-                    f"❌ Wrong! The correct answer was **{self.choices[self.correct_index]}**\n"
-                    f"You picked: `{wrong_answer}`"
-                )
+                content = f"❌ Wrong! The correct answer was **{self.choices[self.correct_index]}**\nYou picked: `{wrong_answer}`"
 
             embed = discord.Embed(
                 title="🧠 Trivia Challenge",
@@ -216,8 +209,6 @@ class RockPaperScissorsView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.challenger_id:
-            await interaction.response.send_message(
-                "This game was started by someone else.", ephemeral=True
-            )
+            await interaction.response.send_message("This game was started by someone else.", ephemeral=True)
             return False
         return True

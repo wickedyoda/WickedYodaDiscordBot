@@ -257,18 +257,13 @@ class AchievementStore:
                     )
                     """
                 )
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_ach_progress_guild"
-                    " ON achievement_progress(guild_id, user_id)"
-                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_ach_progress_guild ON achievement_progress(guild_id, user_id)")
                 conn.commit()
 
     def _now(self) -> str:
         return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
-    def _increment_progress(
-        self, guild_id: int, user_id: int, trigger_type: str, increment: int = 1
-    ) -> int:
+    def _increment_progress(self, guild_id: int, user_id: int, trigger_type: str, increment: int = 1) -> int:
         """Increment progress for a trigger type. Returns new count."""
         with self._lock:
             with self._connect() as conn:
@@ -290,9 +285,7 @@ class AchievementStore:
                 ).fetchone()
                 return int(row["count"]) if row else 0
 
-    def _record_progress(
-        self, guild_id: int, user_id: int, trigger_type: str, count: int
-    ) -> int:
+    def _record_progress(self, guild_id: int, user_id: int, trigger_type: str, count: int) -> int:
         """Set absolute progress for a trigger type (e.g. for message_count from DB)."""
         with self._lock:
             with self._connect() as conn:
@@ -328,9 +321,7 @@ class AchievementStore:
                 ).fetchall()
                 return {r["trigger_type"]: int(r["count"]) for r in rows}
 
-    def _unlock_achievement(
-        self, guild_id: int, user_id: int, achievement_key: str
-    ) -> bool:
+    def _unlock_achievement(self, guild_id: int, user_id: int, achievement_key: str) -> bool:
         """Record an achievement unlock. Returns True if newly unlocked."""
         with self._lock:
             with self._connect() as conn:
@@ -342,16 +333,13 @@ class AchievementStore:
                 if existing:
                     return False
                 conn.execute(
-                    "INSERT INTO achievements_unlocks (guild_id, user_id, achievement_key, unlocked_at)"
-                    " VALUES (?, ?, ?, ?)",
+                    "INSERT INTO achievements_unlocks (guild_id, user_id, achievement_key, unlocked_at) VALUES (?, ?, ?, ?)",
                     (int(guild_id), int(user_id), achievement_key, now),
                 )
                 conn.commit()
                 return True
 
-    def record_event(
-        self, guild_id: int, user_id: int, trigger_type: str, increment: int = 1
-    ) -> list[str]:
+    def record_event(self, guild_id: int, user_id: int, trigger_type: str, increment: int = 1) -> list[str]:
         """
         Record an achievement-triggering event and return list of newly unlocked achievement keys.
         Maps trigger_type to achievement triggers and checks thresholds.
@@ -428,9 +416,7 @@ class AchievementStore:
                     )
                 return results
 
-    def get_achievement_progress(
-        self, guild_id: int, user_id: int
-    ) -> list[dict]:
+    def get_achievement_progress(self, guild_id: int, user_id: int) -> list[dict]:
         """Get progress for all achievements, including unlocked status."""
         user_progress = self.get_all_progress(guild_id, user_id)
         unlocked_keys = {a["key"] for a in self.get_unlocked_achievements(guild_id, user_id)}
@@ -473,7 +459,4 @@ class AchievementStore:
                     """,
                     (int(guild_id), int(limit)),
                 ).fetchall()
-                return [
-                    {"user_id": int(r["user_id"]), "count": int(r["achievement_count"])}
-                    for r in rows
-                ]
+                return [{"user_id": int(r["user_id"]), "count": int(r["achievement_count"])} for r in rows]

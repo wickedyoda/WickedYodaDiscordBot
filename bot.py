@@ -861,14 +861,7 @@ def _is_private_or_internal_host(host: str) -> bool:
         ip = ipaddress.ip_address(hostname)
     except ValueError:
         return False
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-        or ip.is_unspecified
-    )
+    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified
 
 
 def require_http_url(raw_url: str) -> str:
@@ -7023,9 +7016,7 @@ async def wouldyourather(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(name="rps", description="Play rock paper scissors with buttons!")
 @app_commands.describe(challenge="Optional: challenge a specific user")
-async def rps(
-    interaction: discord.Interaction, challenge: discord.Member | None = None
-) -> None:
+async def rps(interaction: discord.Interaction, challenge: discord.Member | None = None) -> None:
     if not await ensure_interaction_command_access(interaction, "rps"):
         return
     if not interaction.guild:
@@ -7086,7 +7077,9 @@ async def guess(interaction: discord.Interaction, number: int | None = None) -> 
     attempts = int(game.get("attempt_count", 0) or 0) + 1
     if int(number) == target_number:
         ACTION_STORE.clear_guess_game(guild_id)
-        await interaction.response.send_message(f"🎉 **Correct!** The number was **{target_number}**. Solved in {attempts} attempt(s).", ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+        await interaction.response.send_message(
+            f"🎉 **Correct!** The number was **{target_number}**. Solved in {attempts} attempt(s).", ephemeral=COMMAND_RESPONSES_EPHEMERAL
+        )
         ACTION_STORE.save_guess_game(guild_id, secure_randint(1, 100), interaction.user.id, attempt_count=0)
         await log_interaction(interaction, action="guess", reason=f"solved in {attempts}", success=True)
         unlocked = ACHIEVEMENT_STORE.record_event(interaction.guild.id, interaction.user.id, "guess_win")
@@ -7095,7 +7088,9 @@ async def guess(interaction: discord.Interaction, number: int | None = None) -> 
         return
     ACTION_STORE.update_guess_game_attempts(guild_id, attempts)
     hint = "higher" if int(number) < target_number else "lower"
-    await interaction.response.send_message(f"📈 Not it. Try **{hint}**. Attempts so far: {attempts}.", ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+    await interaction.response.send_message(
+        f"📈 Not it. Try **{hint}**. Attempts so far: {attempts}.", ephemeral=COMMAND_RESPONSES_EPHEMERAL
+    )
     await log_interaction(interaction, action="guess", reason=f"{number} -> {hint}", success=True)
 
 
@@ -7422,23 +7417,17 @@ async def help_command(interaction: discord.Interaction) -> None:
     await log_interaction(interaction, action="help", success=True)
 
 
-def _record_fun_achievement(
-    interaction: discord.Interaction, trigger: str, increment: int = 1
-) -> list[str] | None:
+def _record_fun_achievement(interaction: discord.Interaction, trigger: str, increment: int = 1) -> list[str] | None:
     """Record a fun command achievement event and return unlocked achievement keys (or None)."""
     if interaction.guild and not interaction.user.bot:
         try:
-            return ACHIEVEMENT_STORE.record_event(
-                interaction.guild.id, interaction.user.id, trigger, increment
-            )
+            return ACHIEVEMENT_STORE.record_event(interaction.guild.id, interaction.user.id, trigger, increment)
         except Exception:
             logger.exception("Failed to record achievement event: %s", trigger)
     return None
 
 
-async def _announce_achievements(
-    interaction: discord.Interaction, unlocked: list[str] | None
-) -> None:
+async def _announce_achievements(interaction: discord.Interaction, unlocked: list[str] | None) -> None:
     """Post ephemeral achievement-unlock announcements."""
     if not unlocked:
         return
@@ -7491,7 +7480,9 @@ async def daily(interaction: discord.Interaction) -> None:
         await reply_ephemeral(interaction, "You've already claimed your daily cookies! Come back tomorrow. 🕐")
         await log_interaction(interaction, action="daily", reason="already claimed", success=False)
         return
-    await interaction.response.send_message(f"🎁 **+{daily_amount} cookies!** Your new balance is **{new_balance}** 🍪", ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+    await interaction.response.send_message(
+        f"🎁 **+{daily_amount} cookies!** Your new balance is **{new_balance}** 🍪", ephemeral=COMMAND_RESPONSES_EPHEMERAL
+    )
     await log_interaction(interaction, action="daily", success=True)
     # Check cookie balance achievements
     unlocked = ACHIEVEMENT_STORE.set_cookie_balance(interaction.guild.id, interaction.user.id, new_balance)
@@ -7715,7 +7706,7 @@ async def quote(
             author = "Unknown"
         embed = discord.Embed(
             title="💭 Quote",
-            description=f"*\"{quote_text}\"*\n\n— {author}",
+            description=f'*"{quote_text}"*\n\n— {author}',
             color=discord.Color.dark_purple(),
         )
         await interaction.response.send_message(embed=embed, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
