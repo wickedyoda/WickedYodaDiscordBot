@@ -109,10 +109,14 @@ def _resolve_default_character_fields(db_path: str, guild_id: int, user_id: int)
     member_name = _member_default_character(db_path, guild_id, user_id)
     if not member_name:
         return {}
-    row = _get_conn(db_path).execute(
-        "SELECT json FROM dnd_characters WHERE guild_id=? AND owner_id=? AND name=?",
-        (int(guild_id), int(user_id), member_name),
-    ).fetchone()
+    row = (
+        _get_conn(db_path)
+        .execute(
+            "SELECT json FROM dnd_characters WHERE guild_id=? AND owner_id=? AND name=?",
+            (int(guild_id), int(user_id), member_name),
+        )
+        .fetchone()
+    )
     if not row:
         return {}
     payload = json.loads(row["json"])
@@ -125,23 +129,38 @@ def _resolve_attribute_for_sheet(edition: str, attribute: str | None, fields: di
     attr = attribute.strip().lower()
     edition_key = (edition or "").strip().lower()
     stat_map_5e = {
-        "str": "strength", "strength": "strength",
-        "dex": "dexterity", "dexterity": "dexterity",
-        "con": "constitution", "constitution": "constitution",
-        "int": "intelligence", "intelligence": "intelligence",
-        "wis": "wisdom", "wisdom": "wisdom",
-        "cha": "charisma", "charisma": "charisma",
+        "str": "strength",
+        "strength": "strength",
+        "dex": "dexterity",
+        "dexterity": "dexterity",
+        "con": "constitution",
+        "constitution": "constitution",
+        "int": "intelligence",
+        "intelligence": "intelligence",
+        "wis": "wisdom",
+        "wisdom": "wisdom",
+        "cha": "charisma",
+        "charisma": "charisma",
     }
     stat_map_20th = {
-        "str": "strength", "strength": "strength",
-        "dex": "dexterity", "dexterity": "dexterity",
-        "sta": "stamina", "stamina": "stamina",
-        "cha": "charisma", "charisma": "charisma",
-        "man": "manipulation", "manipulation": "manipulation",
-        "app": "appearance", "appearance": "appearance",
-        "per": "perception", "perception": "perception",
-        "int": "intelligence", "intelligence": "intelligence",
-        "wit": "wits", "wits": "wits",
+        "str": "strength",
+        "strength": "strength",
+        "dex": "dexterity",
+        "dexterity": "dexterity",
+        "sta": "stamina",
+        "stamina": "stamina",
+        "cha": "charisma",
+        "charisma": "charisma",
+        "man": "manipulation",
+        "manipulation": "manipulation",
+        "app": "appearance",
+        "appearance": "appearance",
+        "per": "perception",
+        "perception": "perception",
+        "int": "intelligence",
+        "intelligence": "intelligence",
+        "wit": "wits",
+        "wits": "wits",
     }
     stat_map = stat_map_20th if edition_key.startswith("20th") else stat_map_5e
     stat_key = stat_map.get(attr, attr)
@@ -167,10 +186,12 @@ def _active_character_initiative_stat(edition: str, fields: dict[str, Any]) -> i
         return _resolve_attribute_for_sheet(edition, "wits", fields)
     return _resolve_attribute_for_sheet(edition, "dexterity", fields)
 
+
 def ensure_dnd_schema() -> None:
     from dnd.characters import ensure_schema as ensure_character_schema
     from dnd.chronicle_schema import ensure_schema as ensure_chronicle_schema
     from dnd.initiative_repo import ensure_schema as ensure_init_schema
+
     ensure_chronicle_schema(DND_DB_PATH)
     ensure_character_schema(DND_DB_PATH)
     ensure_init_schema(DND_DB_PATH)
@@ -190,7 +211,12 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
     async def _log(interaction: Any, action: str, reason: str = "", *, success: bool = True) -> None:
         if log_interaction is None:
             return
-        await log_interaction({"guild": getattr(interaction, "guild", None), "user": getattr(interaction, "user", None)}, action=action, reason=reason, success=success)
+        await log_interaction(
+            {"guild": getattr(interaction, "guild", None), "user": getattr(interaction, "user", None)},
+            action=action,
+            reason=reason,
+            success=success,
+        )
 
     async def _enforce_setup(interaction: Any) -> bool:
         if not getattr(interaction, "guild", None):
@@ -259,9 +285,24 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
         notes: str | None = None,
     ) -> None:  # type: ignore[misc]
         DEBUG_LOGGER.debug("ENTER /dnd roll system=%s pool=%s difficulty=%s modifier=%s", system, pool, difficulty, modifier)
-        log_command(DEBUG_LOGGER, interaction, "roll", system=system, pool=pool, difficulty=difficulty, modifier=modifier, willpower=willpower, speciality=speciality, notes=notes)
+        log_command(
+            DEBUG_LOGGER,
+            interaction,
+            "roll",
+            system=system,
+            pool=pool,
+            difficulty=difficulty,
+            modifier=modifier,
+            willpower=willpower,
+            speciality=speciality,
+            notes=notes,
+        )
         if await _enforce_setup(interaction):
-            DEBUG_LOGGER.debug("BLOCKED /dnd roll setup not complete guild=%s user=%s", getattr(getattr(interaction, "guild", None), "id", "dm"), getattr(getattr(interaction, "user", None), "id", "unknown"))
+            DEBUG_LOGGER.debug(
+                "BLOCKED /dnd roll setup not complete guild=%s user=%s",
+                getattr(getattr(interaction, "guild", None), "id", "dm"),
+                getattr(getattr(interaction, "user", None), "id", "unknown"),
+            )
             return
         edition = _edition_for_guild(interaction)
         edition_info = editions.get_edition(edition)
@@ -330,7 +371,19 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
         notes: str | None = None,
     ) -> None:  # type: ignore[misc]
         DEBUG_LOGGER.debug("ENTER /dnd sheet splat=%s attribute=%s modifier=%s difficulty=%s", splat, attribute, modifier, difficulty)
-        log_command(DEBUG_LOGGER, interaction, "sheet", attribute=attribute, attribute2=attribute2, skill=skill, discipline=discipline, splat=splat, modifier=modifier, difficulty=difficulty, notes=notes)
+        log_command(
+            DEBUG_LOGGER,
+            interaction,
+            "sheet",
+            attribute=attribute,
+            attribute2=attribute2,
+            skill=skill,
+            discipline=discipline,
+            splat=splat,
+            modifier=modifier,
+            difficulty=difficulty,
+            notes=notes,
+        )
         if await _enforce_setup(interaction):
             DEBUG_LOGGER.debug("BLOCKED /dnd sheet setup not complete")
             return
@@ -361,7 +414,9 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
             actual_pool = max(1, base_pool + int(modifier or 0))
             DEBUG_LOGGER.debug("EXECUTE /dnd sheet system=%s hunger=%s pool=%s", system, bool(discipline), actual_pool)
             try:
-                result = route_roll(edition=edition, system=system or edition, pool=actual_pool, difficulty=difficulty, hunger=bool(discipline))
+                result = route_roll(
+                    edition=edition, system=system or edition, pool=actual_pool, difficulty=difficulty, hunger=bool(discipline)
+                )
                 if discipline:
                     result["outcome"] = result.get("outcome", "") + " (Hunger)"
                 lines = [
@@ -427,10 +482,7 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
                 DEBUG_LOGGER.debug("REJECT /dnd info missing edition")
                 return
             info_data = editions.edition_help(edition)
-            reference = (
-                f"\nReference: {editions.WIKI_REFERENCE_URL}\n"
-                f"Summary: {editions.WIKI_SUMMARY}"
-            )
+            reference = f"\nReference: {editions.WIKI_REFERENCE_URL}\nSummary: {editions.WIKI_SUMMARY}"
             await interaction.response.send_message(info_data + reference, ephemeral=True)
             DEBUG_LOGGER.debug("ACCEPT /dnd info edition=%s", edition)
         elif topic == "splat":
@@ -764,9 +816,34 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
             await interaction.response.send_message("Use `create`, `add`, `remove`, or `list`.", ephemeral=True)
 
     @dnd.command(name="reproxy", description="Reproxy/message tracking helpers.")
-    async def reproxy(interaction: Any, action: str = "list", group: str = "", proxy: str = "", target_channel: str = "", source_message: str = "", content: str = "") -> None:  # type: ignore[misc]
-        DEBUG_LOGGER.debug("ENTER /dnd reproxy action=%s group=%s proxy=%s target_channel=%s source_message=%s", action, group, proxy, target_channel, source_message)
-        log_command(DEBUG_LOGGER, interaction, "reproxy", action=action, group=group, proxy=proxy, target_channel=target_channel, source_message=source_message, content=content)
+    async def reproxy(
+        interaction: Any,
+        action: str = "list",
+        group: str = "",
+        proxy: str = "",
+        target_channel: str = "",
+        source_message: str = "",
+        content: str = "",
+    ) -> None:  # type: ignore[misc]
+        DEBUG_LOGGER.debug(
+            "ENTER /dnd reproxy action=%s group=%s proxy=%s target_channel=%s source_message=%s",
+            action,
+            group,
+            proxy,
+            target_channel,
+            source_message,
+        )
+        log_command(
+            DEBUG_LOGGER,
+            interaction,
+            "reproxy",
+            action=action,
+            group=group,
+            proxy=proxy,
+            target_channel=target_channel,
+            source_message=source_message,
+            content=content,
+        )
         if await _enforce_setup(interaction):
             DEBUG_LOGGER.debug("BLOCKED /dnd reproxy setup not complete")
             return
@@ -836,6 +913,7 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
         channel_id = int(interaction.channel.id)
         from dnd import initiative_repo
         from dnd.initiative import InitiativeCharacter, InitiativeTracker
+
         if action == "start":
             tracker = InitiativeTracker(channel_id=channel_id, guild_id=guild_id, owner_id=user_id)
             initiative_repo.save_tracker(DND_DB_PATH, tracker)
@@ -858,7 +936,9 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
             char = InitiativeCharacter(member_id=target_id, display_name=display_name, dex_wits=max(0, dex_wits))
             tracker.characters.append(char)
             initiative_repo.save_tracker(DND_DB_PATH, tracker)
-            await interaction.response.send_message(f"Added initiative entry for `{display_name}` with {stat}={max(0, dex_wits)}.", ephemeral=True)
+            await interaction.response.send_message(
+                f"Added initiative entry for `{display_name}` with {stat}={max(0, dex_wits)}.", ephemeral=True
+            )
             DEBUG_LOGGER.debug("ACCEPT /dnd ini add channel=%s member=%s stat=%s value=%s", channel_id, target_id, stat, max(0, dex_wits))
         elif action == "roll":
             tracker = initiative_repo.load_tracker(DND_DB_PATH, channel_id)
@@ -875,7 +955,9 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
             tracker.phase = "status"
             initiative_repo.save_tracker(DND_DB_PATH, tracker)
             ordered = tracker.ordered()
-            lines = [f"Initiative (`{_edition_label(_edition_for_guild(interaction))}`):"] + [f"- {c.display_name}: {c.total}" for c in ordered]
+            lines = [f"Initiative (`{_edition_label(_edition_for_guild(interaction))}`):"] + [
+                f"- {c.display_name}: {c.total}" for c in ordered
+            ]
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
             DEBUG_LOGGER.debug("ACCEPT /dnd ini roll channel=%s count=%s", channel_id, len(tracker.characters))
         elif action == "status":
@@ -885,7 +967,9 @@ def register_dnd_commands(bot: Any, helpers: dict[str, Any] | None = None) -> No
                 DEBUG_LOGGER.debug("REJECT /dnd ini status missing channel=%s", channel_id)
                 return
             ordered = tracker.ordered()
-            lines = [f"Initiative status (`{_edition_label(_edition_for_guild(interaction))}`):"] + [f"- {c.display_name}: {c.total}" for c in ordered]
+            lines = [f"Initiative status (`{_edition_label(_edition_for_guild(interaction))}`):"] + [
+                f"- {c.display_name}: {c.total}" for c in ordered
+            ]
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
             DEBUG_LOGGER.debug("ACCEPT /dnd ini status channel=%s count=%s", channel_id, len(ordered))
         elif action == "clear":

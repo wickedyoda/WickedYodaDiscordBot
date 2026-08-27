@@ -90,7 +90,16 @@ def list_group_proxies(db_path: str, guild_id: int, owner_id: int, group_name: s
     return [dict(r) for r in rows]
 
 
-def record_reproxy(db_path: str, guild_id: int, target_channel_id: int, owner_id: int, group_name: str, proxy_id: int, source_message_id: str = "", content: str = "") -> dict[str, Any]:
+def record_reproxy(
+    db_path: str,
+    guild_id: int,
+    target_channel_id: int,
+    owner_id: int,
+    group_name: str,
+    proxy_id: int,
+    source_message_id: str = "",
+    content: str = "",
+) -> dict[str, Any]:
     with _get_conn(db_path) as conn:
         now = _utc_now()
         conn.execute(

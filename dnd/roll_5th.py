@@ -34,7 +34,9 @@ def build_sheet_pool(base: int, hunger: bool = False, modifier: int = 0, despera
     return pool
 
 
-def roll_sheet_pool(pool: int, difficulty: int = 6, hunger: bool = False, modifier: int = 0, desperation: bool = False, rage: bool = False) -> SheetRollResult:
+def roll_sheet_pool(
+    pool: int, difficulty: int = 6, hunger: bool = False, modifier: int = 0, desperation: bool = False, rage: bool = False
+) -> SheetRollResult:
     actual_pool = build_sheet_pool(pool, hunger=hunger, modifier=modifier, desperation=desperation, rage=rage)
     dice = [roll_v5_die() for _ in range(actual_pool)]
     successes = 0
@@ -43,7 +45,9 @@ def roll_sheet_pool(pool: int, difficulty: int = 6, hunger: bool = False, modifi
             successes += 1
         if d == 10:
             successes += 1
-    result = SheetRollResult(pool=actual_pool, difficulty=difficulty, hunger=hunger, desperation=desperation, rage=rage, dice=dice, successes=successes)
+    result = SheetRollResult(
+        pool=actual_pool, difficulty=difficulty, hunger=hunger, desperation=desperation, rage=rage, dice=dice, successes=successes
+    )
     if successes >= difficulty:
         result.outcome = "Success"
     else:

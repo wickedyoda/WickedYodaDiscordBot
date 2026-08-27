@@ -37,9 +37,7 @@ def _request_json(
     normalized_api_key = str(api_key or "").strip()
     if normalized_api_key:
         headers["Authorization"] = f"Bearer {normalized_api_key}"
-    response = requests.request(
-        method, url, json=payload, headers=headers, timeout=timeout, verify=verify_tls
-    )
+    response = requests.request(method, url, json=payload, headers=headers, timeout=timeout, verify=verify_tls)
     return response
 
 
@@ -59,9 +57,7 @@ def list_monitors(
         verify_tls=verify_tls,
     )
     if response.status_code in (401, 403):
-        raise UptimeKumaAdminError(
-            "Uptime Kuma authentication failed. Check API key or guest API access."
-        )
+        raise UptimeKumaAdminError("Uptime Kuma authentication failed. Check API key or guest API access.")
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict):
@@ -94,11 +90,7 @@ def list_monitors(
                 "upside_down": monitor.get("upsideDown"),
                 "max_redirects": monitor.get("maxredirects"),
                 "ignore_ssl": monitor.get("ignoreSsl"),
-                "tags": [
-                    str(tag.get("name", ""))
-                    for tag in (monitor.get("tags") or [])
-                    if isinstance(tag, dict)
-                ],
+                "tags": [str(tag.get("name", "")) for tag in (monitor.get("tags") or []) if isinstance(tag, dict)],
                 "created_at": monitor.get("createdAt"),
             }
         )
@@ -122,9 +114,7 @@ def add_monitor(
         verify_tls=verify_tls,
     )
     if response.status_code in (401, 403):
-        raise UptimeKumaAdminError(
-            "Uptime Kuma authentication failed. Check API key or guest API access."
-        )
+        raise UptimeKumaAdminError("Uptime Kuma authentication failed. Check API key or guest API access.")
     payload = response.json() if response.status_code == 200 else {}
     if not isinstance(payload, dict) or payload.get("ok") is not True:
         raise UptimeKumaAdminError(payload.get("msg") or "Failed to add monitor.")
@@ -149,9 +139,7 @@ def update_monitor(
         verify_tls=verify_tls,
     )
     if response.status_code in (401, 403):
-        raise UptimeKumaAdminError(
-            "Uptime Kuma authentication failed. Check API key or guest API access."
-        )
+        raise UptimeKumaAdminError("Uptime Kuma authentication failed. Check API key or guest API access.")
     payload = response.json() if response.status_code == 200 else {}
     if not isinstance(payload, dict) or payload.get("ok") is not True:
         raise UptimeKumaAdminError(payload.get("msg") or "Failed to edit monitor.")
@@ -175,9 +163,7 @@ def remove_monitor(
         verify_tls=verify_tls,
     )
     if response.status_code in (401, 403):
-        raise UptimeKumaAdminError(
-            "Uptime Kuma authentication failed. Check API key or guest API access."
-        )
+        raise UptimeKumaAdminError("Uptime Kuma authentication failed. Check API key or guest API access.")
     payload = response.json() if response.status_code == 200 else {}
     if not isinstance(payload, dict) or payload.get("ok") is not True:
         raise UptimeKumaAdminError(payload.get("msg") or "Failed to remove monitor.")
