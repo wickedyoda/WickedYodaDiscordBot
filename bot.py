@@ -7439,7 +7439,7 @@ async def _announce_achievements(interaction: discord.Interaction, unlocked: lis
                 ephemeral=True,
             )
         except Exception:
-            pass
+            pass  # nosec B110
 
 
 @bot.tree.command(name="balance", description="Check your cookie balance.")
