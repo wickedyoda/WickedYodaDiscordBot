@@ -34,18 +34,15 @@ def parse_image(image_str):
         last_slash = image_str.rfind("/")
         if colon_pos > last_slash and colon_pos != -1:
             repo = image_str[:colon_pos]
-            tag = image_str[colon_pos + 1:]
+            tag = image_str[colon_pos + 1 :]
         else:
             repo = image_str
             tag = "latest"
         # Split registry from path
         first_slash = repo.find("/")
-        if (
-            first_slash > -1
-            and ("." in repo[:first_slash] or repo[:first_slash] in ("localhost", "ghcr.io", "registry.gitlab.com"))
-        ):
+        if first_slash > -1 and ("." in repo[:first_slash] or repo[:first_slash] in ("localhost", "ghcr.io", "registry.gitlab.com")):
             registry = repo[:first_slash]
-            repo_path = repo[first_slash + 1:]
+            repo_path = repo[first_slash + 1 :]
         else:
             registry = "docker.io"
             repo_path = repo
@@ -100,6 +97,7 @@ def _is_newer_version(current, latest):
         return True
     if latest == "latest":
         return False
+
     # Simple semver comparison
     def clean(v):
         return re.sub(r"[^0-9.]", "", v)
@@ -208,9 +206,7 @@ def get_containers_with_updates():
                 "latest_tag": latest_tag or "N/A",
                 "update_available": latest_tag is not None,
                 "status": c.status,
-                "state": c.attrs["State"]["Health"]["Status"]
-                if c.attrs.get("State", {}).get("Health")
-                else c.status,
+                "state": c.attrs["State"]["Health"]["Status"] if c.attrs.get("State", {}).get("Health") else c.status,
                 "ports": _parse_ports(c.attrs["NetworkSettings"]["Ports"]),
             }
         )
@@ -242,11 +238,7 @@ def _get_current_schedule():
         if os.path.exists(CRON_FILE):
             with open(CRON_FILE) as f:
                 content = f.read()
-            lines = [
-                line
-                for line in content.split("\n")
-                if not line.startswith(("SHELL", "PATH", "")) and line.strip()
-            ]
+            lines = [line for line in content.split("\n") if not line.startswith(("SHELL", "PATH", "")) and line.strip()]
             if lines:
                 return lines[0].split("root")[0].strip()
         return os.environ.get("WATCHTOWER_SCHEDULE", "0 */6 * * *")
@@ -329,9 +321,7 @@ def update_container(container_id):
         # Restart the container
         c.restart()
 
-        return jsonify(
-            {"status": "success", "message": f"Container {c.name} updated and restarted"}
-        )
+        return jsonify({"status": "success", "message": f"Container {c.name} updated and restarted"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

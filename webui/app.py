@@ -157,14 +157,7 @@ def _is_blocked_ip_address(host: str) -> bool:
         ip = ipaddress.ip_address(hostname)
     except ValueError:
         return False
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-        or ip.is_unspecified
-    )
+    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified
 
 
 def _normalize_monitor_target(raw_value: str, monitor_type: str) -> str:
@@ -3767,11 +3760,17 @@ def create_app(
                 else:
                     response_headers.append(("Location", "/admin/uptime-kuma/proxy/"))
 
-        response_headers.append(("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'"))
+        response_headers.append(
+            (
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'",
+            )
+        )
         response_headers.append(("X-Content-Type-Options", "nosniff"))
         response_headers.append(("X-Frame-Options", "DENY"))
 
         from flask import Response
+
         return Response(
             response_body,
             status=resp.status_code,

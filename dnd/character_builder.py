@@ -340,10 +340,7 @@ _CHARACTER_FIELDS: dict[str, list[str]] = {
 }
 
 # Back-compat lookup expected by older code
-EDITION_DEFAULTS = {
-    key: fields[:]
-    for key, fields in _CHARACTER_FIELDS.items()
-}
+EDITION_DEFAULTS = {key: fields[:] for key, fields in _CHARACTER_FIELDS.items()}
 
 
 def fields_for(splat: str) -> list[str]:
