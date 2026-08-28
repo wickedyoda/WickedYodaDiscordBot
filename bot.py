@@ -8172,4 +8172,157 @@ async def command_permission_error(interaction: discord.Interaction, error: app_
 
 
 if __name__ == "__main__":
-    bot.run(DISCORD_TOKEN)
+    import argparse
+    import secrets
+    import string as _string
+
+    parser = argparse.ArgumentParser(
+        prog="bot",
+        description="WickedYoda Discord bot runtime + admin CLI.",
+    )
+    parser.add_argument(
+        "--reset-password",
+        dest="reset_password_email",
+        metavar="EMAIL",
+        help=(
+            "Reset the password for an existing web admin user (e.g. "
+            "traveryates@gmail.com). If --new-password is omitted, a "
+            "strong random password is generated and printed to stdout."
+        ),
+    )
+    parser.add_argument(
+        "--new-password",
+        dest="reset_password_new",
+        metavar="PASSWORD",
+        help="New plaintext password to set (only used with --reset-password).",
+    )
+    parser.add_argument(
+        "--create-admin",
+        dest="create_admin_email",
+        metavar="EMAIL",
+        help=(
+            "Create a new web admin user with the given email. If "
+            "--new-password is omitted, a strong random password is "
+            "generated. Use --display-name, --first-name, --last-name to "
+            "set profile fields."
+        ),
+    )
+    parser.add_argument("--display-name", dest="display_name", default="", help="Display name for --create-admin.")
+    parser.add_argument("--first-name", dest="first_name", default="", help="First name for --create-admin.")
+    parser.add_argument("--last-name", dest="last_name", default="", help="Last name for --create-admin.")
+    parser.add_argument(
+        "--non-admin",
+        dest="non_admin",
+        action="store_true",
+        help="When used with --create-admin, mark the user as non-admin (is_admin=0).",
+    )
+    parser.add_argument(
+        "--print-reset-link",
+        dest="print_reset_link",
+        action="store_true",
+        help=(
+            "After running --reset-password, also generate a one-time "
+            "password-reset token and print the URL. Useful when SMTP is "
+            "not configured."
+        ),
+    )
+    parser.add_argument(
+        "--web-base-url",
+        dest="web_base_url",
+        default="",
+        help="Base URL used to build the reset link printed by --print-reset-link (e.g. https://wickedyoda.example.com).",
+    )
+
+    cli_args, _remaining = parser.parse_known_args()
+
+    def _generate_random_password(length: int = 20) -> str:
+        alphabet = _string.ascii_letters + _string.digits + "!@#$%^&*()-_=+"
+        return "".join(secrets.choice(alphabet) for _ in range(length))
+
+    def _run_cli() -> int:
+        from werkzeug.security import generate_password_hash
+
+        # If user wants a reset link printed, ensure password reset is logically enabled in-app too.
+        if cli_args.print_reset_link:
+            os.environ["WEB_PASSWORD_RESET_ENABLED"] = "true"
+            if not os.environ.get("WEB_PUBLIC_BASE_URL") and cli_args.web_base_url:
+                os.environ["WEB_PUBLIC_BASE_URL"] = cli_args.web_base_url
+
+        if not cli_args.reset_password_email and not cli_args.create_admin_email:
+            # No admin command: just run the bot.
+            bot.run(DISCORD_TOKEN)
+            return 0
+
+        target_db_path = ACTION_DB_PATH
+        from app.web_user_store import _ensure_users_table, _sqlite_connect  # type: ignore
+
+        _ensure_users_table(target_db_path)
+        target_email = (cli_args.reset_password_email or cli_args.create_admin_email).strip().lower()
+        new_password = cli_args.reset_password_new or _generate_random_password()
+
+        with _sqlite_connect(target_db_path) as conn:
+            existing = conn.execute("SELECT email, is_admin FROM web_users WHERE email = ?", (target_email,)).fetchone()
+
+            if cli_args.create_admin_email:
+                if existing is not None:
+                    print(f"User already exists: {target_email}")
+                    return 2
+                is_admin = 0 if cli_args.non_admin else 1
+                now_iso = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+                conn.execute(
+                    """
+                    INSERT INTO web_users (
+                        email, password_hash, display_name, first_name, last_name,
+                        is_admin, is_guild_admin, is_dnd_role, created_at, password_changed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+                    """,
+                    (
+                        target_email,
+                        generate_password_hash(new_password),
+                        cli_args.display_name or target_email.split("@", 1)[0],
+                        cli_args.first_name,
+                        cli_args.last_name,
+                        1 if is_admin else 0,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                conn.commit()
+                print(f"Created admin user {target_email} (is_admin={is_admin}).")
+            else:
+                if existing is None:
+                    print(f"User not found: {target_email}")
+                    return 3
+                new_hash = generate_password_hash(new_password)
+                now_iso = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+                conn.execute(
+                    "UPDATE web_users SET password_hash = ?, password_changed_at = ? WHERE email = ?",
+                    (new_hash, now_iso, target_email),
+                )
+                conn.commit()
+                print(f"Reset password for {target_email}.")
+
+        print()
+        print("Login credentials:")
+        print(f"  Email:    {target_email}")
+        print(f"  Password: {new_password}")
+        print()
+
+        if cli_args.print_reset_link and not cli_args.create_admin_email:
+            from webui.app import (
+                _create_password_reset_token,
+            )  # type: ignore
+
+            base_url = cli_args.web_base_url or os.environ.get("WEB_PUBLIC_BASE_URL", "").strip()
+            token = _create_password_reset_token(target_db_path, target_email)
+            if base_url:
+                reset_link = f"{base_url.rstrip('/')}/reset-password/{token}"
+                print("Password reset link (valid 30 minutes, single use):")
+                print(f"  {reset_link}")
+            else:
+                print("Skipped printing reset link: provide --web-base-url or set WEB_PUBLIC_BASE_URL so the link can be formed.")
+        return 0
+
+    import sys as _sys
+
+    _sys.exit(_run_cli())

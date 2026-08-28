@@ -2203,6 +2203,30 @@ def create_app(
     def _build_password_reset_link(raw_token: str) -> str:
         return f"{_password_reset_base_url()}{url_for('password_reset_confirm', token=raw_token)}"
 
+    def _emit_unmailed_reset_link(target_email: str, reset_url: str) -> None:
+        """Log a password reset link to bot + audit logs when SMTP is not configured.
+
+        The end-user does not receive the link by email in this branch, so the
+        link is written to the bot's main log file and the web audit log so an
+        operator with container shell access can deliver it out-of-band.
+        """
+        try:
+            app.logger.warning(
+                "Password reset link for %s (SMTP not configured; deliver manually): %s",
+                target_email,
+                reset_url,
+            )
+        except Exception:
+            pass
+        try:
+            audit_logger.warning(
+                "password_reset_unmailed target=%s link=%s",
+                target_email,
+                reset_url,
+            )
+        except Exception:
+            pass
+
     def _send_password_reset_email(target_email: str, raw_token: str) -> None:
         smtp_host = os.getenv("WEB_SMTP_HOST", "").strip()
         from_email = os.getenv("WEB_SMTP_FROM_EMAIL", "").strip()
@@ -3084,16 +3108,27 @@ def create_app(
             password_reset_attempts[client_ip] = attempts[-password_reset_max_attempts:]
 
             user = _get_user(db_path, email) if _is_valid_email(email) else None
-            if user is not None and _password_reset_mail_ready():
+            if user is not None:
                 try:
                     raw_token = _create_password_reset_token(
                         db_path,
                         email,
                         ttl_minutes=password_reset_ttl_minutes,
                     )
-                    _send_password_reset_email(email, raw_token)
+                    reset_url = _build_password_reset_link(raw_token)
+                    if _password_reset_mail_ready():
+                        try:
+                            _send_password_reset_email(email, raw_token)
+                        except Exception:
+                            app.logger.exception("Failed to send password reset email for %s", email)
+                    else:
+                        # No SMTP configured — write the link to the bot log and audit log so an
+                        # admin (or operator with shell access to the container) can deliver it
+                        # out-of-band. This keeps the in-app recovery flow functional even when
+                        # email delivery is not set up.
+                        _emit_unmailed_reset_link(email, reset_url)
                 except Exception:
-                    app.logger.exception("Failed to send password reset email for %s", email)
+                    app.logger.exception("Failed to issue password reset token for %s", email)
             flash(generic_message, "info")
             return redirect(url_for("login"))
         return _render_page("forgot_password", "Forgot Password")
