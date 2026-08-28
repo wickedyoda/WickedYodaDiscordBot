@@ -130,3 +130,48 @@ def test_guild_spicy_settings_and_prompt_cache(tmp_path: Path, monkeypatch) -> N
     assert prompt["pack_id"] == "spicy-core"
     assert prompt["prompt_id"] == "prompt_001"
     assert prompt["text"] == "Describe your ideal late-night date in one sentence."
+
+
+def test_translation_store_and_settings(tmp_path: Path, monkeypatch) -> None:
+    from app.translation import TranslationStore, get_lang_for_flag, parse_channel_ids_list
+
+    # 1. Flag mapping test
+    assert get_lang_for_flag("🇪🇸") == "es"
+    assert get_lang_for_flag("🇫🇷") == "fr"
+    assert get_lang_for_flag("🇯🇵") == "ja"
+    assert get_lang_for_flag("🇬🇧") == "en"
+    assert get_lang_for_flag("invalid") is None
+
+    # 2. Channel IDs parser test
+    assert parse_channel_ids_list([123, "456", "abc"]) == [123, 456]
+    assert parse_channel_ids_list("123, 456, 789") == [123, 456, 789]
+    assert parse_channel_ids_list(None) == []
+
+    # 3. TranslationStore DB test
+    store = TranslationStore(str(tmp_path / "translation.db"))
+    default_settings = store.get_settings(999)
+    assert default_settings["flag_translation_enabled"] == 0
+    assert default_settings["flag_translation_mode"] == "reply"
+    assert default_settings["context_menu_enabled"] == 1
+    assert default_settings["channel_auto_translate_enabled"] == 0
+
+    saved = store.save_settings(
+        999,
+        flag_translation_enabled=1,
+        flag_translation_mode="ephemeral",
+        context_menu_enabled=1,
+        channel_auto_translate_enabled=1,
+        channel_auto_translate_channel_ids=[1001, 1002],
+        channel_auto_translate_target_lang="es",
+    )
+    assert saved["flag_translation_enabled"] == 1
+    assert saved["flag_translation_mode"] == "ephemeral"
+    assert saved["channel_auto_translate_enabled"] == 1
+    assert saved["channel_auto_translate_channel_ids"] == [1001, 1002]
+    assert saved["channel_auto_translate_target_lang"] == "es"
+
+    loaded = store.get_settings(999)
+    assert loaded["flag_translation_enabled"] == 1
+    assert loaded["flag_translation_mode"] == "ephemeral"
+    assert loaded["channel_auto_translate_channel_ids"] == [1001, 1002]
+    assert loaded["channel_auto_translate_target_lang"] == "es"

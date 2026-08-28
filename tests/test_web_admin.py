@@ -1642,6 +1642,71 @@ def test_account_profile_update_saves_optional_discord_user_id(tmp_path: Path, m
     assert row == ("owner@example.com", "Wicked", "Yoda", 999888777666555444)
 
 
+def test_translation_settings_page_render_and_save(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+    db_path = tmp_path / "actions.db"
+
+    saved_translation_payloads: list[dict] = []
+
+    def get_translation_settings(_guild_id: int) -> dict:
+        if saved_translation_payloads:
+            return {"ok": True, **saved_translation_payloads[-1]}
+        return {
+            "ok": True,
+            "guild_id": 12345,
+            "flag_translation_enabled": 0,
+            "flag_translation_mode": "reply",
+            "context_menu_enabled": 1,
+            "channel_auto_translate_enabled": 0,
+            "channel_auto_translate_channel_ids": [],
+            "channel_auto_translate_target_lang": "en",
+        }
+
+    def manage_translation_settings(payload: dict, _actor: str, _guild_id: int) -> dict:
+        saved_translation_payloads.append(payload)
+        return {"ok": True, **payload, "message": "Translation settings updated."}
+
+    app = create_app(
+        str(db_path),
+        _bot_snapshot,
+        get_translation_settings=get_translation_settings,
+        manage_translation_settings=manage_translation_settings,
+    )
+    client = app.test_client()
+    csrf_token = _login(client)
+
+    # 1. GET /admin/translation-settings
+    res = client.get("/admin/translation-settings")
+    assert res.status_code == 200
+    assert b"Auto-Translation Settings" in res.data
+    assert b"Flag Reaction Auto-Translate" in res.data
+    assert b"Dedicated Channel Live Auto-Translate" in res.data
+    assert b"Right-Click Apps Context Menu" in res.data
+
+    # 2. POST /admin/translation-settings/save
+    res_save = client.post(
+        "/admin/translation-settings/save",
+        data={
+            "flag_translation_enabled": "1",
+            "flag_translation_mode": "ephemeral",
+            "channel_auto_translate_enabled": "1",
+            "channel_auto_translate_channel_ids": "1001, 1002",
+            "channel_auto_translate_target_lang": "es",
+            "context_menu_enabled": "1",
+        },
+        headers={"X-CSRF-Token": csrf_token},
+        follow_redirects=True,
+    )
+    assert res_save.status_code == 200
+    assert b"Auto-translation settings updated." in res_save.data
+    assert len(saved_translation_payloads) == 1
+    assert saved_translation_payloads[0]["flag_translation_enabled"] == 1
+    assert saved_translation_payloads[0]["flag_translation_mode"] == "ephemeral"
+    assert saved_translation_payloads[0]["channel_auto_translate_enabled"] == 1
+    assert saved_translation_payloads[0]["channel_auto_translate_target_lang"] == "es"
+
+
 def test_account_password_update_preserves_existing_discord_user_id(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
     monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
