@@ -1,0 +1,68 @@
+# Test / preview environment for the alternative Web GUI variants.
+#
+# This is an OPT-IN preview stack that runs the gui1 (Modern Sidebar Dashboard)
+# and gui2 (Command Center) variants side-by-side on different ports, leaving
+# the production wickedyoda-little-helper on its normal port untouched.
+#
+# Usage:
+#   # 1. Make sure the two test images are loaded locally:
+#   docker load -i /tmp/wickedyoda-bot-gui1.tar
+#   docker tag wickedyoda-bot:gui1-test wickedyoda-bot:gui1-preview
+#   docker load -i /tmp/wickedyoda-bot-gui2.tar
+#   docker tag wickedyoda-bot:gui2-test wickedyoda-bot:gui2-preview
+#
+#   # 2. Start the previews:
+#   cd /root/docker/wickedyodabot
+#   docker compose -f docker-compose.gui-previews.yml up -d
+#
+#   # 3. Browse the variants (locally on serv2-docker):
+#   #    - Production (classic): http://localhost:8080
+#   #    - gui1 (Modern Sidebar): http://localhost:9080   (set WEB_GUI_VARIANT=v1)
+#   #    - gui2 (Command Center): http://localhost:9081   (set WEB_GUI_VARIANT=v2)
+#
+#   # 4. To compare in Tailscale from your machine, reach them via the host's
+#   #    Tailscale IP on the same ports.
+#
+#   # 5. Stop the previews when done:
+#   docker compose -f docker-compose.gui-previews.yml down
+
+services:
+  wickedyoda-gui1-test:
+    image: wickedyoda-bot:gui1-preview
+    pull_policy: never
+    container_name: wickedyoda-gui1-test
+    env_file:
+      - env.env
+    environment:
+      DATA_DIR: /app/data
+      LOG_DIR: /logs
+      TZ: ${TZ:-UTC}
+      WEB_GUI_VARIANT: v1
+    ports:
+      - "127.0.0.1:9080:8080"
+    volumes:
+      - ${DATA_DIR:-/root/docker/wickedyodabot}:/app/data
+      - ${LOG_DIR:-/root/docker/wickedyodabot/logs}:/logs
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    restart: unless-stopped
+
+  wickedyoda-gui2-test:
+    image: wickedyoda-bot:gui2-preview
+    pull_policy: never
+    container_name: wickedyoda-gui2-test
+    env_file:
+      - env.env
+    environment:
+      DATA_DIR: /app/data
+      LOG_DIR: /logs
+      TZ: ${TZ:-UTC}
+      WEB_GUI_VARIANT: v2
+    ports:
+      - "127.0.0.1:9081:8080"
+    volumes:
+      - ${DATA_DIR:-/root/docker/wickedyodabot}:/app/data
+      - ${LOG_DIR:-/root/docker/wickedyodabot/logs}:/logs
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    restart: unless-stopped
