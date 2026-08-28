@@ -1707,6 +1707,38 @@ def test_translation_settings_page_render_and_save(tmp_path: Path, monkeypatch) 
     assert saved_translation_payloads[0]["channel_auto_translate_target_lang"] == "es"
 
 
+def test_web_gui_variant_v1_renders(tmp_path: Path, monkeypatch) -> None:
+    """The v1 (Modern Sidebar Dashboard) variant should render sidebar/topbar shell."""
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+    monkeypatch.setenv("WEB_GUI_VARIANT", "v1")
+    db_path = tmp_path / "actions.db"
+    app = create_app(str(db_path), _bot_snapshot)
+    client = app.test_client()
+    _login(client)
+
+    # Login page should still render in v1
+    res_login = client.get("/login")
+    assert res_login.status_code == 200
+    assert b"wy-login-card" in res_login.data
+
+    # Home page should render v1 sidebar + tile grid
+    res_home = client.get("/admin/home")
+    assert res_home.status_code == 200
+    assert b"wy-sidebar" in res_home.data
+    assert b"wy-tile-group-title" in res_home.data
+    assert b"Bot status" in res_home.data
+    assert b"wy-topbar" in res_home.data
+    # Sidebar group titles
+    assert b"Overview" in res_home.data
+    assert b"Server Configuration" in res_home.data
+
+    # Non-home page (settings) should wrap legacy body in v1 shell
+    res_settings = client.get("/admin/guild-settings")
+    assert res_settings.status_code == 200
+    assert b"wy-sidebar" in res_settings.data
+
+
 def test_account_password_update_preserves_existing_discord_user_id(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
     monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")

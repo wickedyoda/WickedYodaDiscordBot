@@ -51,6 +51,11 @@ from webui.constants import (
 )
 from webui.template import PAGE_TEMPLATE
 
+try:
+    from webui.template_v1 import PAGE_TEMPLATE as PAGE_TEMPLATE_V1
+except ImportError:  # pragma: no cover
+    PAGE_TEMPLATE_V1 = None
+
 
 def _is_sensitive_key(key: str) -> bool:
     if key in SENSITIVE_ENV_KEYS:
@@ -2274,6 +2279,10 @@ def create_app(
         selected_guild_id, guild_options, selected_guild_name = _selected_guild_context()
         if "snapshot" not in kwargs:
             kwargs["snapshot"] = get_bot_snapshot() if callable(get_bot_snapshot) else {}
+        gui_variant = os.environ.get("WEB_GUI_VARIANT", "classic").strip().lower()
+        if gui_variant == "v1" and PAGE_TEMPLATE_V1 is not None:
+            assert PAGE_TEMPLATE_V1 is not None  # for type checkers
+            return _render_page_v1(page, title, **kwargs)
         return render_template_string(
             PAGE_TEMPLATE,
             page=page,
@@ -2286,6 +2295,58 @@ def create_app(
             feed_interval_options=[{"value": value, "label": label} for value, label in FEED_INTERVAL_OPTIONS],
             can_manage_guild=_current_user_is_admin() or _current_user_is_guild_admin(),
             password_reset_enabled=password_reset_enabled,
+            **kwargs,
+        )
+
+    def _render_page_v1(page: str, title: str, **kwargs):
+        """Render the page body using the legacy template, then wrap it in the v1 sidebar shell."""
+        assert PAGE_TEMPLATE_V1 is not None
+        selected_guild_id, guild_options, selected_guild_name = _selected_guild_context()
+        if "snapshot" not in kwargs:
+            kwargs["snapshot"] = get_bot_snapshot() if callable(get_bot_snapshot) else {}
+        if page == "home":
+            return render_template_string(
+                PAGE_TEMPLATE_V1,
+                page=page,
+                title=title,
+                csrf_token=_ensure_csrf_token(),
+                selected_guild_id=selected_guild_id,
+                selected_guild_name=selected_guild_name,
+                guild_options=guild_options,
+                restart_enabled=restart_enabled,
+                feed_interval_options=[{"value": value, "label": label} for value, label in FEED_INTERVAL_OPTIONS],
+                can_manage_guild=_current_user_is_admin() or _current_user_is_guild_admin(),
+                password_reset_enabled=password_reset_enabled,
+                wy_page_body="",
+                **kwargs,
+            )
+        legacy_html = render_template_string(
+            PAGE_TEMPLATE,
+            page=page,
+            title=title,
+            csrf_token=_ensure_csrf_token(),
+            selected_guild_id=selected_guild_id,
+            selected_guild_name=selected_guild_name,
+            guild_options=guild_options,
+            restart_enabled=restart_enabled,
+            feed_interval_options=[{"value": value, "label": label} for value, label in FEED_INTERVAL_OPTIONS],
+            can_manage_guild=_current_user_is_admin() or _current_user_is_guild_admin(),
+            password_reset_enabled=password_reset_enabled,
+            **kwargs,
+        )
+        return render_template_string(
+            PAGE_TEMPLATE_V1,
+            page=page,
+            title=title,
+            csrf_token=_ensure_csrf_token(),
+            selected_guild_id=selected_guild_id,
+            selected_guild_name=selected_guild_name,
+            guild_options=guild_options,
+            restart_enabled=restart_enabled,
+            feed_interval_options=[{"value": value, "label": label} for value, label in FEED_INTERVAL_OPTIONS],
+            can_manage_guild=_current_user_is_admin() or _current_user_is_guild_admin(),
+            password_reset_enabled=password_reset_enabled,
+            wy_page_body=legacy_html,
             **kwargs,
         )
 
