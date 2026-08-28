@@ -1838,14 +1838,16 @@ def test_password_recovery_cli_help_runs(tmp_path: Path, monkeypatch) -> None:
     import subprocess
     import sys
 
+    # The tests directory lives at <repo>/tests/. The bot package is at <repo>/bot.py.
+    repo_root = Path(__file__).resolve().parent.parent
     env = os.environ.copy()
-    env["PYTHONPATH"] = "/root/.hermes/wickedyoda-bot"
+    env["PYTHONPATH"] = str(repo_root)
     proc = subprocess.run(
         [sys.executable, "-m", "bot", "--help"],
         capture_output=True,
         text=True,
         env=env,
-        cwd="/root/.hermes/wickedyoda-bot",
+        cwd=str(repo_root),
         timeout=30,
     )
     assert proc.returncode == 0, f"--help exited {proc.returncode}: {proc.stderr}"
@@ -1859,7 +1861,8 @@ def test_password_recovery_cli_uses_correct_imports(tmp_path: Path) -> None:
     Regression test: the CLI was previously broken by importing these symbols
     from `app.web_user_store` where they do not exist.
     """
-    bot_source = (Path("/root/.hermes/wickedyoda-bot/bot.py")).read_text(encoding="utf-8")
+    repo_root = Path(__file__).resolve().parent.parent
+    bot_source = (repo_root / "bot.py").read_text(encoding="utf-8")
     assert "from app.web_user_store import _ensure_users_table" not in bot_source, (
         "bot.py must not import _ensure_users_table from app.web_user_store"
     )
