@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from typing import Any
 
-LOG_PATH = os.environ.get("WICKEDYODA_DND_DEBUG_LOG") or os.path.join(os.environ.get("DATA_DIR", "/app/data"), "dnd_debug.log")
+LOG_PATH = os.environ.get("WICKEDYODA_DND_DEBUG_LOG") or os.path.join(
+    os.environ.get("DATA_DIR") or os.path.join(tempfile.gettempdir(), "wickedyoda-bot"),
+    "dnd_debug.log",
+)
 
 
 def get_logger(name: str = "dnd") -> logging.Logger:
