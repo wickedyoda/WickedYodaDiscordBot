@@ -141,7 +141,7 @@ PAGE_TEMPLATE = """
     body[data-theme="black"] .text-muted,
     body[data-theme="black"] small,
     body[data-theme="black"] .small {
-      color: #cbd5e1 !important;
+      color: #d1d5db !important;
     }
     body[data-theme="black"] .form-text,
     body[data-theme="black"] .form-label,
@@ -150,7 +150,25 @@ PAGE_TEMPLATE = """
     body[data-theme="black"] div,
     body[data-theme="black"] td,
     body[data-theme="black"] th {
-      color: inherit;
+      color: #ffffff;
+    }
+    body[data-theme="black"] .text-secondary,
+    body[data-theme="black"] .text-muted {
+      color: #d1d5db !important;
+    }
+    body[data-theme="black"] .dashboard-hero-lead,
+    body[data-theme="black"] .dashboard-note {
+      color: #cbd5e1 !important;
+    }
+    body[data-theme="black"] .dashboard-pill strong,
+    body[data-theme="black"] .dashboard-list-item strong,
+    body[data-theme="black"] .dashboard-list-item .text-secondary,
+    body[data-theme="black"] .dashboard-pill span {
+      color: #ffffff !important;
+    }
+    body[data-theme="black"] .dashboard-list-item .text-secondary,
+    body[data-theme="black"] .dashboard-pill strong {
+      color: #94a3b8 !important;
     }
     .text-secondary, .text-muted {
       color: var(--muted) !important;
