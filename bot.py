@@ -8254,7 +8254,7 @@ if __name__ == "__main__":
             return 0
 
         target_db_path = ACTION_DB_PATH
-        from app.web_user_store import _ensure_users_table, _sqlite_connect  # type: ignore
+        from webui.app import _ensure_users_table, _sqlite_connect  # type: ignore
 
         _ensure_users_table(target_db_path)
         target_email = (cli_args.reset_password_email or cli_args.create_admin_email).strip().lower()

@@ -1826,3 +1826,48 @@ def test_users_add_rejects_weak_password(tmp_path: Path, monkeypatch) -> None:
 
     assert response.status_code == 200
     assert b"Password must be at least 6 characters." in response.data
+
+
+def test_password_recovery_cli_help_runs(tmp_path: Path, monkeypatch) -> None:
+    """`python -m bot --help` must exit 0 and list the recovery flags.
+
+    Regression test for a bug where `from app.web_user_store import _ensure_users_table`
+    crashed the CLI on startup with ImportError because those symbols live in webui.app.
+    """
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = "/root/.hermes/wickedyoda-bot"
+    proc = subprocess.run(
+        [sys.executable, "-m", "bot", "--help"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd="/root/.hermes/wickedyoda-bot",
+        timeout=30,
+    )
+    assert proc.returncode == 0, f"--help exited {proc.returncode}: {proc.stderr}"
+    assert "--reset-password" in proc.stdout
+    assert "--create-admin" in proc.stdout
+
+
+def test_password_recovery_cli_uses_correct_imports(tmp_path: Path) -> None:
+    """Verify bot.py imports _ensure_users_table and _sqlite_connect from webui.app.
+
+    Regression test: the CLI was previously broken by importing these symbols
+    from `app.web_user_store` where they do not exist.
+    """
+    bot_source = (Path("/root/.hermes/wickedyoda-bot/bot.py")).read_text(encoding="utf-8")
+    assert "from app.web_user_store import _ensure_users_table" not in bot_source, (
+        "bot.py must not import _ensure_users_table from app.web_user_store"
+    )
+    assert "from webui.app import _ensure_users_table, _sqlite_connect" in bot_source, (
+        "bot.py must import _ensure_users_table and _sqlite_connect from webui.app"
+    )
+    # Also verify those symbols actually exist in webui.app
+    from webui.app import _ensure_users_table, _sqlite_connect
+
+    assert callable(_ensure_users_table)
+    assert callable(_sqlite_connect)
