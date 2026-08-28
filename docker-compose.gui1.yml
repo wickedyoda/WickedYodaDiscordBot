@@ -1,0 +1,24 @@
+services:
+  wickedyoda-gui1:
+    image: wickedyoda-bot:gui1-preview
+    pull_policy: never
+    container_name: wickedyoda-gui1-preview
+    env_file:
+      - env.env
+    environment:
+      DATA_DIR: /app/data
+      LOG_DIR: /logs
+      TZ: ${TZ:-UTC}
+      WEB_GUI_VARIANT: v1
+    ports:
+      # Bound to 127.0.0.1 only - reach via Tailscale or SSH tunnel to test
+      - "127.0.0.1:9080:8080"
+    volumes:
+      # Separate storage dirs so the preview doesn't clobber production data
+      - /root/docker/wickedyodabot-gui1/data:/app/data
+      - /root/docker/wickedyodabot-gui1/logs:/logs
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: "no"
