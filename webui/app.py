@@ -1982,6 +1982,8 @@ def create_app(
     manage_reaction_roles: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     get_discourse: Callable[[int], dict] | None = None,
     manage_discourse: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_translation_settings: Callable[[int], dict] | None = None,
+    manage_translation_settings: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
 ) -> Flask:
     app = Flask(__name__)
     _ensure_users_table(db_path)
@@ -2582,6 +2584,37 @@ def create_app(
             return manage_discourse(payload, actor, guild_id)
         except TypeError:
             return manage_discourse(payload, actor)
+
+    def _call_translation_settings_get(guild_id: int | None) -> dict:
+        if guild_id is None or not callable(get_translation_settings):
+            return {"ok": False, "error": "Translation settings callback is not configured."}
+        return get_translation_settings(guild_id)
+
+    def _build_translation_form_payload(form) -> dict:
+        flag_enabled = str(form.get("flag_translation_enabled") or "0").strip()
+        context_enabled = str(form.get("context_menu_enabled") or "0").strip()
+        chan_enabled = str(form.get("channel_auto_translate_enabled") or "0").strip()
+        flag_mode = str(form.get("flag_translation_mode") or "reply").strip().lower()
+        if flag_mode not in {"reply", "ephemeral"}:
+            flag_mode = "reply"
+        channel_ids = form.getlist("channel_auto_translate_channel_ids") or [form.get("channel_auto_translate_channel_ids") or ""]
+        target_lang = str(form.get("channel_auto_translate_target_lang") or "en").strip() or "en"
+        return {
+            "flag_translation_enabled": 1 if flag_enabled in {"1", "true", "yes", "on"} else 0,
+            "flag_translation_mode": flag_mode,
+            "context_menu_enabled": 1 if context_enabled in {"1", "true", "yes", "on"} else 0,
+            "channel_auto_translate_enabled": 1 if chan_enabled in {"1", "true", "yes", "on"} else 0,
+            "channel_auto_translate_channel_ids": channel_ids,
+            "channel_auto_translate_target_lang": target_lang,
+        }
+
+    def _call_manage_translation_settings(payload: dict, actor: str, guild_id: int | None) -> dict:
+        if guild_id is None or not callable(manage_translation_settings):
+            return {"ok": False, "error": "Translation manage callback is not configured."}
+        try:
+            return manage_translation_settings(payload, actor, guild_id)
+        except TypeError:
+            return manage_translation_settings(payload, actor)
 
     def _call_leave_guild(actor: str, guild_id: int | None) -> dict:
         if guild_id is None or not callable(leave_guild):
@@ -5492,6 +5525,36 @@ def create_app(
             flash("Discourse settings updated.", "success")
         return redirect(url_for("discourse_page"))
 
+    @app.get("/admin/translation")
+    @login_required
+    def translation():
+        return _render_page("translation", "Auto-Translation")
+
+    @app.get("/admin/translation-settings")
+    @login_required
+    def translation_page():
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _call_translation_settings_get(selected_guild_id)
+        if not isinstance(payload, dict):
+            payload = {"ok": False, "error": "Translation settings are unavailable."}
+        channels_catalog = _call_get_discord_catalog(selected_guild_id).get("channels") or []
+        text_channels = [c for c in channels_catalog if str(c.get("type", "")).lower() in {"text", "0", "news", "5"}]
+        return _render_page("translation", "Auto-Translation", translation=payload, available_channels=text_channels)
+
+    @app.post("/admin/translation-settings/save")
+    @login_required
+    def translation_save():
+        if not _current_user_can_manage_guild():
+            return _reject_read_only_write("translation")
+        selected_guild_id, _, _ = _selected_guild_context()
+        payload = _build_translation_form_payload(request.form)
+        result = _call_manage_translation_settings(payload, str(session.get("user", "")), selected_guild_id)
+        if not isinstance(result, dict) or not result.get("ok"):
+            flash(str(result.get("error")) if isinstance(result, dict) else "Failed to save translation settings.", "danger")
+        else:
+            flash("Auto-translation settings updated.", "success")
+        return redirect(url_for("translation_page"))
+
     return app
 
 
@@ -5534,6 +5597,8 @@ def start_web_admin(
     manage_reaction_roles: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     get_discourse: Callable[[int], dict] | None = None,
     manage_discourse: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
+    get_translation_settings: Callable[[int], dict] | None = None,
+    manage_translation_settings: Callable[[dict, str, int], dict] | Callable[[dict, str], dict] | None = None,
     host: str = "127.0.0.1",
     port: int = 8081,
     ssl_context: str | tuple[str, str] | None = None,
@@ -5577,6 +5642,8 @@ def start_web_admin(
         manage_reaction_roles=manage_reaction_roles,
         get_discourse=get_discourse,
         manage_discourse=manage_discourse,
+        get_translation_settings=get_translation_settings,
+        manage_translation_settings=manage_translation_settings,
     )
 
     def run() -> None:

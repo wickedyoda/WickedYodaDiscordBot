@@ -40,6 +40,7 @@ from app.fun_data import (
     YODA_WISDOM_EXTENDED,
 )
 from app.interactive_games import GuessTheNumberView, RockPaperScissorsView, TriviaView
+from app.translation import TranslationStore, get_lang_for_flag
 from core.bot_constants import (
     COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR,
     COMMAND_PERMISSION_DEFAULT_POLICY_PUBLIC,
@@ -802,6 +803,7 @@ intents.guilds = True
 intents.members = ENABLE_MEMBERS_INTENT
 intents.messages = True
 intents.message_content = ENABLE_MESSAGE_CONTENT_INTENT
+intents.reactions = True
 
 
 def normalize_target_url(raw_url: str) -> str:
@@ -4055,6 +4057,7 @@ write_startup_log_files(LOG_DIR, [BOT_LOG_FILE, BOT_CHANNEL_LOG_FILE, CONTAINER_
 ACTION_STORE = ActionStore(ACTION_DB_PATH)
 COOKIE_STORE = CookieStore(ACTION_DB_PATH)
 ACHIEVEMENT_STORE = AchievementStore(ACTION_DB_PATH)
+TRANSLATION_STORE = TranslationStore(ACTION_DB_PATH)
 
 
 async def resolve_member_activity_members_async(guild_id: int, user_ids: list[int]) -> dict[int, discord.Member]:
@@ -5208,6 +5211,42 @@ def run_web_manage_discourse_settings(payload: dict, actor_email: str, guild_id:
     return {"ok": False, "error": "Discourse callback is not configured."}
 
 
+def run_web_get_translation_settings(guild_id: int) -> dict:
+    try:
+        settings = TRANSLATION_STORE.get_settings(guild_id)
+        return {"ok": True, **settings}
+    except Exception as exc:
+        logger.exception("Failed to load translation settings for guild %s", guild_id)
+        return {"ok": False, "error": f"Failed to load translation settings: {exc}"}
+
+
+def run_web_manage_translation_settings(payload: dict, actor_email: str, guild_id: int) -> dict:
+    if not isinstance(payload, dict):
+        return {"ok": False, "error": "Invalid payload."}
+    try:
+        saved = TRANSLATION_STORE.save_settings(
+            guild_id=guild_id,
+            flag_translation_enabled=payload.get("flag_translation_enabled"),
+            flag_translation_mode=payload.get("flag_translation_mode"),
+            context_menu_enabled=payload.get("context_menu_enabled"),
+            channel_auto_translate_enabled=payload.get("channel_auto_translate_enabled"),
+            channel_auto_translate_channel_ids=payload.get("channel_auto_translate_channel_ids"),
+            channel_auto_translate_target_lang=payload.get("channel_auto_translate_target_lang"),
+        )
+        record_action_safe(
+            action="update_translation_settings",
+            status="success",
+            moderator=actor_email,
+            target=str(guild_id),
+            reason=truncate_log_text("Updated auto-translation settings"),
+            guild=str(guild_id),
+        )
+        return {"ok": True, **saved, "message": "Translation settings updated."}
+    except Exception as exc:
+        logger.exception("Failed to save translation settings for guild %s", guild_id)
+        return {"ok": False, "error": f"Failed to save translation settings: {exc}"}
+
+
 async def _ensure_color_roles(guild_id: int, names: list[str]) -> list[int]:
     guild = bot.get_guild(int(guild_id))
     if guild is None:
@@ -5316,6 +5355,8 @@ class ModerationBot(commands.Bot):
                 manage_reaction_roles=run_web_manage_reaction_roles,
                 get_discourse=run_web_get_discourse_settings,
                 manage_discourse=run_web_manage_discourse_settings,
+                get_translation_settings=run_web_get_translation_settings,
+                manage_translation_settings=run_web_manage_translation_settings,
                 host=WEB_BIND_HOST,
                 port=WEB_PORT,
             )
@@ -5363,6 +5404,16 @@ class ModerationBot(commands.Bot):
                         resolve_youtube_community_seed=lambda source_url: resolve_youtube_community_seed(source_url),
                         resolve_wordpress_feed=lambda source_url: resolve_wordpress_feed_seed(source_url),
                         resolve_linkedin_feed=lambda source_url: resolve_linkedin_feed_seed(source_url),
+                        get_honeypot=run_web_get_honeypot,
+                        manage_honeypot=run_web_manage_honeypot,
+                        get_role_access=run_web_get_role_access_mappings,
+                        manage_role_access=run_web_manage_role_access_mappings,
+                        get_reaction_roles=run_web_get_reaction_roles,
+                        manage_reaction_roles=run_web_manage_reaction_roles,
+                        get_discourse=run_web_get_discourse_settings,
+                        manage_discourse=run_web_manage_discourse_settings,
+                        get_translation_settings=run_web_get_translation_settings,
+                        manage_translation_settings=run_web_manage_translation_settings,
                         host=WEB_BIND_HOST,
                         port=WEB_TLS_PORT,
                         ssl_context=ssl_context,
@@ -5556,7 +5607,80 @@ class ModerationBot(commands.Bot):
                     response = tag_mapping.get(tag_key)
                     if response and can_use_command(message.author, "tag", guild_id=message.guild.id):
                         await message.channel.send(response)
+            elif content and TRANSLATE_API_URL:
+                try:
+                    t_settings = TRANSLATION_STORE.get_settings(message.guild.id)
+                    if t_settings.get("channel_auto_translate_enabled"):
+                        monitored_channels = t_settings.get("channel_auto_translate_channel_ids") or []
+                        if message.channel.id in monitored_channels:
+                            target_lang = str(t_settings.get("channel_auto_translate_target_lang") or "en")
+                            translated = await asyncio.to_thread(translate_text, content, target_lang)
+                            # Only reply if translation differs from original
+                            if translated and translated.strip().lower() != content.lower():
+                                lang_label = TRANSLATE_LANGUAGE_BY_CODE.get(target_lang, target_lang)
+                                if len(translated) > 1900:
+                                    translated = translated[:1897] + "..."
+                                await message.reply(
+                                    f"🌐 **Auto-Translation ({lang_label}):**\n{translated}",
+                                    mention_author=False,
+                                )
+                except Exception:
+                    logger.exception("Failed channel auto-translation in channel %s", message.channel.id)
         await self.process_commands(message)
+
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
+        if not payload.guild_id or not payload.user_id:
+            return
+        # Don't respond to bot reactions
+        if self.user and payload.user_id == self.user.id:
+            return
+        managed_ids = {guild.id for guild in self.get_managed_guilds()}
+        if payload.guild_id not in managed_ids:
+            return
+        if not TRANSLATE_API_URL:
+            return
+        emoji_str = str(payload.emoji.name) if payload.emoji.name else ""
+        target_lang = get_lang_for_flag(emoji_str)
+        if not target_lang:
+            return
+        try:
+            t_settings = TRANSLATION_STORE.get_settings(payload.guild_id)
+            if not t_settings.get("flag_translation_enabled"):
+                return
+            guild = self.get_guild(payload.guild_id)
+            if not guild:
+                return
+            channel = guild.get_channel(payload.channel_id)
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                return
+            try:
+                message = await channel.fetch_message(payload.message_id)
+            except (discord.NotFound, discord.Forbidden):
+                return
+            if not message or not message.content or not message.content.strip():
+                return
+            translated = await asyncio.to_thread(translate_text, message.content.strip(), target_lang)
+            if not translated:
+                return
+            lang_label = TRANSLATE_LANGUAGE_BY_CODE.get(target_lang, target_lang)
+            if len(translated) > 1900:
+                translated = translated[:1897] + "..."
+            mode = t_settings.get("flag_translation_mode", "reply")
+            if mode == "ephemeral":
+                # DM user if mode is private/ephemeral
+                user = guild.get_member(payload.user_id) or await self.fetch_user(payload.user_id)
+                if user:
+                    try:
+                        await user.send(f"🌐 **Translation to {lang_label}** for message in {channel.mention}:\n{translated}")
+                    except discord.Forbidden:
+                        pass
+            else:
+                await message.reply(
+                    f"🌐 **Translation ({lang_label}):**\n{translated}",
+                    mention_author=False,
+                )
+        except Exception:
+            logger.exception("Failed flag reaction translation for message %s", payload.message_id)
 
     async def refresh_spicy_prompt_catalog(self, *, reason: str, actor: str = "system") -> None:
         if not SPICY_PROMPTS_ENABLED or not SPICY_PROMPTS_REPO_URL:
@@ -6781,6 +6905,41 @@ async def translate(interaction: discord.Interaction, text: str, language: app_c
         ephemeral=COMMAND_RESPONSES_EPHEMERAL,
     )
     await log_interaction(interaction, action="translate", reason=f"target={language.value}", success=True)
+
+
+@bot.tree.context_menu(name="Translate to English")
+async def translate_context_menu(interaction: discord.Interaction, message: discord.Message) -> None:
+    if not await ensure_interaction_command_access(interaction, "translate"):
+        await log_interaction(interaction, action="translate_context_menu", reason="permission denied", success=False)
+        return
+    if interaction.guild:
+        try:
+            t_settings = TRANSLATION_STORE.get_settings(interaction.guild.id)
+            if not t_settings.get("context_menu_enabled", 1):
+                await reply_ephemeral(interaction, "Context menu translation is disabled on this server.")
+                return
+        except Exception:
+            pass  # nosec B110
+    content = (message.content or "").strip()
+    if not content:
+        await reply_ephemeral(interaction, "Message has no text to translate.")
+        return
+    if not TRANSLATE_API_URL:
+        await reply_ephemeral(interaction, "Translation service is not configured.")
+        return
+    try:
+        translated = await asyncio.to_thread(translate_text, content, "en")
+    except Exception as exc:
+        await reply_ephemeral(interaction, f"Translation failed: {exc}")
+        await log_interaction(interaction, action="translate_context_menu", reason=str(exc), success=False)
+        return
+    if len(translated) > 1900:
+        translated = translated[:1897] + "..."
+    await interaction.response.send_message(
+        f"🌐 **Translation (English):**\n{translated}",
+        ephemeral=True,
+    )
+    await log_interaction(interaction, action="translate_context_menu", reason=f"msg_id={message.id}", success=True)
 
 
 @bot.tree.command(name="wikihelp", description="Search the game help wiki.")

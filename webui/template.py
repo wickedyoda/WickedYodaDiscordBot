@@ -654,6 +654,7 @@ PAGE_TEMPLATE = """
                 <option value="{{ url_for('role_access') }}">Role Access</option>
                 <option value="{{ url_for('reaction_roles') }}">Reaction Roles</option>
                 <option value="{{ url_for('discourse') }}">Discourse</option>
+                <option value="{{ url_for('translation_page') }}">Translation</option>
                 {% if session.get("is_admin") %}
                 <option value="{{ url_for('users') }}">Users</option>
                 <option value="{{ url_for('guild_access') }}">Guild Access</option>
@@ -758,6 +759,7 @@ PAGE_TEMPLATE = """
             <option value="{{ url_for('role_access') }}">Role Access</option>
             <option value="{{ url_for('reaction_roles') }}">Reaction Roles</option>
             <option value="{{ url_for('discourse') }}">Discourse</option>
+            <option value="{{ url_for('translation_page') }}">Translation</option>
             {% if session.get("is_admin") %}
             <option value="{{ url_for('users') }}">Users</option>
             <option value="{{ url_for('guild_access') }}">Guild Access</option>
@@ -2871,6 +2873,90 @@ PAGE_TEMPLATE = """
       <div class="card card-soft p-3">
         <h1 class="h5 mb-3">Discourse</h1>
         <p class="small text-secondary">Forum integration and sync settings.</p>
+      </div>
+    {% elif page == "translation" %}
+      <div class="card card-soft p-3 mb-3">
+        <h1 class="h5 mb-2">🌐 Auto-Translation Settings</h1>
+        <p class="small text-secondary mb-3">Configure automated and interactive translation features for <strong>{{ selected_guild_name or "this server" }}</strong>.</p>
+        <form method="post" action="{{ url_for('translation_save') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+          <div class="card p-3 mb-3 bg-dark-subtle border-0">
+            <h6 class="fw-bold mb-2">1. 🚩 Flag Reaction Auto-Translate</h6>
+            <p class="small text-secondary mb-3">When a user reacts to any message with a country flag emoji (e.g. 🇪🇸, 🇫🇷, 🇯🇵, 🇩🇪, 🇬🇧), the bot will translate that message into the flag's language.</p>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" id="flag_translation_enabled" name="flag_translation_enabled" value="1" {% if translation.flag_translation_enabled %}checked{% endif %} {% if not can_manage_guild %}disabled{% endif %}>
+              <label class="form-check-label fw-semibold" for="flag_translation_enabled">Enable Flag Reaction Translation</label>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small fw-semibold" for="flag_translation_mode">Delivery Mode</label>
+              <select class="form-select form-select-sm" id="flag_translation_mode" name="flag_translation_mode" {% if not can_manage_guild %}disabled{% endif %}>
+                <option value="reply" {% if translation.flag_translation_mode != "ephemeral" %}selected{% endif %}>Public Message Reply (visible in channel)</option>
+                <option value="ephemeral" {% if translation.flag_translation_mode == "ephemeral" %}selected{% endif %}>Private DM to reactor (keeps channel clean)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="card p-3 mb-3 bg-dark-subtle border-0">
+            <h6 class="fw-bold mb-2">2. 💬 Dedicated Channel Live Auto-Translate</h6>
+            <p class="small text-secondary mb-3">Automatically translate incoming messages in designated channels into a target language.</p>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" id="channel_auto_translate_enabled" name="channel_auto_translate_enabled" value="1" {% if translation.channel_auto_translate_enabled %}checked{% endif %} {% if not can_manage_guild %}disabled{% endif %}>
+              <label class="form-check-label fw-semibold" for="channel_auto_translate_enabled">Enable Channel Live Auto-Translate</label>
+            </div>
+            <div class="row g-2 mb-2">
+              <div class="col-12 col-md-6">
+                <label class="form-label small fw-semibold" for="channel_auto_translate_target_lang">Target Language</label>
+                <select class="form-select form-select-sm" id="channel_auto_translate_target_lang" name="channel_auto_translate_target_lang" {% if not can_manage_guild %}disabled{% endif %}>
+                  <option value="en" {% if translation.channel_auto_translate_target_lang == "en" %}selected{% endif %}>English (en)</option>
+                  <option value="es" {% if translation.channel_auto_translate_target_lang == "es" %}selected{% endif %}>Spanish (es)</option>
+                  <option value="fr" {% if translation.channel_auto_translate_target_lang == "fr" %}selected{% endif %}>French (fr)</option>
+                  <option value="de" {% if translation.channel_auto_translate_target_lang == "de" %}selected{% endif %}>German (de)</option>
+                  <option value="it" {% if translation.channel_auto_translate_target_lang == "it" %}selected{% endif %}>Italian (it)</option>
+                  <option value="pt" {% if translation.channel_auto_translate_target_lang == "pt" %}selected{% endif %}>Portuguese (pt)</option>
+                  <option value="ja" {% if translation.channel_auto_translate_target_lang == "ja" %}selected{% endif %}>Japanese (ja)</option>
+                  <option value="zh" {% if translation.channel_auto_translate_target_lang == "zh" %}selected{% endif %}>Chinese (zh)</option>
+                  <option value="ko" {% if translation.channel_auto_translate_target_lang == "ko" %}selected{% endif %}>Korean (ko)</option>
+                  <option value="ar" {% if translation.channel_auto_translate_target_lang == "ar" %}selected{% endif %}>Arabic (ar)</option>
+                  <option value="ru" {% if translation.channel_auto_translate_target_lang == "ru" %}selected{% endif %}>Russian (ru)</option>
+                  <option value="hi" {% if translation.channel_auto_translate_target_lang == "hi" %}selected{% endif %}>Hindi (hi)</option>
+                  <option value="nl" {% if translation.channel_auto_translate_target_lang == "nl" %}selected{% endif %}>Dutch (nl)</option>
+                  <option value="pl" {% if translation.channel_auto_translate_target_lang == "pl" %}selected{% endif %}>Polish (pl)</option>
+                  <option value="tr" {% if translation.channel_auto_translate_target_lang == "tr" %}selected{% endif %}>Turkish (tr)</option>
+                  <option value="uk" {% if translation.channel_auto_translate_target_lang == "uk" %}selected{% endif %}>Ukrainian (uk)</option>
+                  <option value="vi" {% if translation.channel_auto_translate_target_lang == "vi" %}selected{% endif %}>Vietnamese (vi)</option>
+                  <option value="id" {% if translation.channel_auto_translate_target_lang == "id" %}selected{% endif %}>Indonesian (id)</option>
+                </select>
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label small fw-semibold" for="channel_auto_translate_channel_ids">Monitored Channel(s)</label>
+                <select class="form-select form-select-sm" id="channel_auto_translate_channel_ids" name="channel_auto_translate_channel_ids" multiple size="3" {% if not can_manage_guild %}disabled{% endif %}>
+                  {% if available_channels %}
+                    {% for ch in available_channels %}
+                      <option value="{{ ch.id }}" {% if ch.id in translation.channel_auto_translate_channel_ids or ch.id|string in translation.channel_auto_translate_channel_ids %}selected{% endif %}>#{{ ch.name }}</option>
+                    {% endfor %}
+                  {% else %}
+                    <option value="" disabled>No text channels discovered</option>
+                  {% endif %}
+                </select>
+                <div class="form-text small">Hold Ctrl / Cmd to select multiple channels.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card p-3 mb-3 bg-dark-subtle border-0">
+            <h6 class="fw-bold mb-2">3. 🖱️ Right-Click Apps Context Menu</h6>
+            <p class="small text-secondary mb-3">Allows users to right-click (or long press on mobile) any message and select <strong>Apps &rarr; Translate to English</strong> for a private instant translation.</p>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" id="context_menu_enabled" name="context_menu_enabled" value="1" {% if translation.context_menu_enabled %}checked{% endif %} {% if not can_manage_guild %}disabled{% endif %}>
+              <label class="form-check-label fw-semibold" for="context_menu_enabled">Enable "Translate to English" Apps Menu Item</label>
+            </div>
+          </div>
+
+          {% if can_manage_guild %}
+          <button type="submit" class="btn btn-primary">Save Translation Settings</button>
+          {% endif %}
+        </form>
       </div>
     {% elif page == "observability" %}
       <div class="row g-3 mb-3">
