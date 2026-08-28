@@ -2216,7 +2216,7 @@ def create_app(
                 target_email,
                 reset_url,
             )
-        except Exception:
+        except Exception:  # nosec B110
             pass
         try:
             audit_logger.warning(
@@ -2224,7 +2224,7 @@ def create_app(
                 target_email,
                 reset_url,
             )
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     def _send_password_reset_email(target_email: str, raw_token: str) -> None:
