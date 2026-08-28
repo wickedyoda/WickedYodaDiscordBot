@@ -117,6 +117,44 @@ PAGE_TEMPLATE = """
       --input-bg: #ffffff;
       --input-fg: #102132;
     }
+    body[data-theme="black"] {
+      --bg: #000000;
+      --bg-grad-a: #000000;
+      --bg-grad-b: #050505;
+      --fg: #ffffff;
+      --muted: #cbd5e1;
+      --card: #0d0d0d;
+      --border: #334155;
+      --header: #000000;
+      --link: #93c5fd;
+      --btn-bg: #2563eb;
+      --btn-secondary: #475569;
+      --btn-danger: #dc2626;
+      --flash-err-bg: #450a0a;
+      --flash-err-fg: #fecaca;
+      --flash-ok-bg: #052e16;
+      --flash-ok-fg: #bbf7d0;
+      --input-bg: #0a0a0a;
+      --input-fg: #ffffff;
+    }
+    body[data-theme="black"] .text-secondary,
+    body[data-theme="black"] .text-muted,
+    body[data-theme="black"] small,
+    body[data-theme="black"] .small {
+      color: #cbd5e1 !important;
+    }
+    body[data-theme="black"] .form-text,
+    body[data-theme="black"] .form-label,
+    body[data-theme="black"] p,
+    body[data-theme="black"] span,
+    body[data-theme="black"] div,
+    body[data-theme="black"] td,
+    body[data-theme="black"] th {
+      color: inherit;
+    }
+    .text-secondary, .text-muted {
+      color: var(--muted) !important;
+    }
     body {
       font-family: "Trebuchet MS", "Lucida Sans", "Segoe UI", sans-serif;
       margin: 0;
