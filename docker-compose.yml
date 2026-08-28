@@ -12,7 +12,18 @@ services:
       TZ: ${TZ:-UTC}
     ports:
       - "8080:8080"
-      - "8081:8081"
+    # ------------------------------------------------------------------
+    # RECOMMENDED COURSE OF ACTION (web GUI lives on container :8080):
+    #   • The bot's Flask web admin GUI runs on container :8080, so the
+    #     host-side `8080:8080` mapping above is the only publish you
+    #     need for the admin UI.
+    #   • Do NOT add an `8081:8081` mapping here — there is no longer a
+    #     separate admin listener on :8081, and the second mapping
+    #     historically just caused confusion (port 8081 was a no-op).
+    #   • If you need to access the admin GUI only from the Tailnet /
+    #     reverse proxy, change the mapping to `127.0.0.1:8080:8080`
+    #     so it is not exposed on the host's public interface.
+    # ------------------------------------------------------------------
     volumes:
       # Run with `docker compose --env-file env.env ...` so DATA_DIR comes from env.env.
       # DATA_DIR here is the host-side bind path; the container target remains /app/data.
