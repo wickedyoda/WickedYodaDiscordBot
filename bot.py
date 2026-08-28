@@ -8244,7 +8244,7 @@ if __name__ == "__main__":
 
         # If user wants a reset link printed, ensure password reset is logically enabled in-app too.
         if cli_args.print_reset_link:
-            os.environ["WEB_PASSWORD_RESET_ENABLED"] = "true"
+            os.environ["WEB_PASSWORD_RESET_ENABLED"] = "true"  # nosec B105
             if not os.environ.get("WEB_PUBLIC_BASE_URL") and cli_args.web_base_url:
                 os.environ["WEB_PUBLIC_BASE_URL"] = cli_args.web_base_url
 
