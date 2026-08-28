@@ -1826,3 +1826,37 @@ def test_users_add_rejects_weak_password(tmp_path: Path, monkeypatch) -> None:
 
     assert response.status_code == 200
     assert b"Password must be at least 6 characters." in response.data
+
+
+def test_web_gui_variant_v2_renders(tmp_path: Path, monkeypatch) -> None:
+    """The v2 (Command Center) variant should render topbar + command palette."""
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_USERNAME", "admin@example.com")
+    monkeypatch.setenv("WEB_ADMIN_DEFAULT_PASSWORD", "TestPass123!")
+    monkeypatch.setenv("WEB_GUI_VARIANT", "v2")
+    db_path = tmp_path / "actions.db"
+    app = create_app(str(db_path), _bot_snapshot)
+    client = app.test_client()
+    _login(client)
+
+    # Login page should still render in v2
+    res_login = client.get("/login")
+    assert res_login.status_code == 200
+    assert b"cc-login-card" in res_login.data
+
+    # Home page should render v2 topbar + accordion sections
+    res_home = client.get("/admin/home")
+    assert res_home.status_code == 200
+    assert b"cc-topbar" in res_home.data
+    assert b"cc-palette" in res_home.data
+    assert b"Command Center" in res_home.data
+    assert b"cc-section" in res_home.data
+    # Accordion sections
+    assert b"Bot Operations" in res_home.data
+    assert b"Servers" in res_home.data
+    assert b"Feeds" in res_home.data
+
+    # Non-home page should wrap legacy body in v2 topbar shell
+    res_settings = client.get("/admin/guild-settings")
+    assert res_settings.status_code == 200
+    assert b"cc-topbar" in res_settings.data
+    assert b"cc-palette" in res_settings.data
