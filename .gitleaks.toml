@@ -1,0 +1,12 @@
+# Gitleaks configuration for WickedYodaDiscordBot
+# https://github.com/gitleaks/gitleaks
+
+title = "wickedyoda-gitleaks-config"
+
+# Allowlist fake Discord IDs used as test fixtures
+# These look like real Discord client IDs to gitleaks but are
+# placeholders in test files, not credentials.
+[allowlist]
+description = "Test fixture Discord IDs are not real secrets"
+path = "tests/"
+regex = '''9{4,}'''
