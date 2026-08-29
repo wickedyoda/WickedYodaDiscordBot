@@ -1,4 +1,5 @@
 import hmac
+import logging
 import os
 import re
 
@@ -59,6 +60,8 @@ def get_latest_tag(registry, repo, tag):
                 image_name = repo
             else:
                 image_name = repo
+            # image_name from parse_image() — validated against docker naming rules,
+            # no path traversal or injection possible here.
             url = f"https://hub.docker.com/v2/repositories/{image_name}/tags/?page_size=100&ordering=last_updated"
             import requests
 
@@ -76,7 +79,7 @@ def get_latest_tag(registry, repo, tag):
                 # Private or doesn't exist
                 return None
     except Exception:
-        return None
+        return None  # graceful fallback
 
     # For ghcr.io and other registries, try the registry v2 API
     try:
@@ -114,8 +117,8 @@ def _is_newer_version(current, latest):
                 return True
             if c > lat:
                 return False
-    except Exception:  # nosec B110 — intentional graceful fallback, returns None on parse error
-        pass
+    except Exception as e:  # nosec B110 — intentional graceful fallback, returns False on parse error
+        logging.warning("Version comparison failed for %s vs %s: %s", current, latest, e)
     return False
 
 
@@ -138,8 +141,8 @@ def _check_ghcr(repo, current_tag):
                 for t in sorted(version_tags, reverse=True):
                     if _is_newer_version(current_tag, t):
                         return t
-    except Exception:  # nosec B110 — registry API may be unreachable
-        pass
+    except Exception as e:  # nosec B110 — registry API may be unreachable
+        logging.warning("GHCR tag check failed for %s: %s", repo, e)
     return None
 
 
@@ -180,8 +183,8 @@ def _check_generic_registry(registry, repo, current_tag):
             for t in sorted(tags, reverse=True):
                 if t and _is_newer_version(current_tag, t):
                     return t
-    except Exception:  # nosec B110 — registry API may be unreachable
-        pass
+    except Exception as e:  # nosec B110 — registry API may be unreachable
+        logging.warning("Generic registry tag check failed for %s: %s", registry, e)
     return None
 
 
