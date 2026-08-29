@@ -1,0 +1,6 @@
+# Configuration to disable GitHub Copilot code review on PRs
+# https://docs.github.com/en/copilot/using-github-copilot/autocomplete/configuring-github-copilot-on-github
+# Setting code_review.auto_enable to false prevents Copilot from being
+# automatically requested as a reviewer on pull requests.
+code_review:
+  auto_enable: false
