@@ -33,6 +33,7 @@ jobs:
             zricethezav/gitleaks:v8.24.3 \
             detect \
             --source . \
+            --config .gitleaks.toml \
             --no-git \
             --redact \
             --exit-code 1 \
