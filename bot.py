@@ -8308,11 +8308,11 @@ if __name__ == "__main__":
         # Write password to a secure temp file instead of stdout (avoids
         # clear-text credential logging — CodeQL py/clear-text-logging-sensitive-data).
         import stat as _stat
+
         cred_path = Path(tempfile.gettempdir()) / "wickedyoda_reset_creds.txt"
         cred_path.chmod(_stat.S_IRUSR | _stat.S_IWUSR)
         cred_path.write_text(
-            f"Email:    {target_email}\n"
-            f"Password: {new_password}\n",
+            f"Email:    {target_email}\nPassword: {new_password}\n",
             mode=_stat.S_IRUSR | _stat.S_IWUSR,
         )
         print(f"  Password: written to {cred_path} (perms 0600)")
