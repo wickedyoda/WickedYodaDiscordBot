@@ -17,8 +17,17 @@ COPY watchtower-gui/ .
 COPY watchtower-gui/scripts/update-containers.sh /app/update-containers.sh
 RUN chmod +x /app/update-containers.sh
 
+# Create non-root user for security (fixes Trivy DS002)
+RUN addgroup --system --gid 10001 appgroup && \
+    adduser --system --uid 10001 --gid appgroup --no-create-home --home /app appuser
+
 # Cron setup
 RUN touch /etc/cron.d/watchtower-auto && chmod 0644 /etc/cron.d/watchtower-auto
+
+# Fix permissions for non-root user
+RUN chown -R appuser:appgroup /app
+
+USER appuser
 
 EXPOSE 5000
 

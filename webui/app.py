@@ -2211,10 +2211,15 @@ def create_app(
         operator with container shell access can deliver it out-of-band.
         """
         try:
+            # Redact the token from the URL before logging to avoid
+            # clear-text logging of sensitive reset tokens (CodeQL
+            # py/clear-text-logging-sensitive-data).
+            redacted_url = reset_url.split("/reset-password/")
+            redacted_url = redacted_url[0] + "/reset-password/<REDACTED>" if len(redacted_url) > 1 else "<redacted>"
             app.logger.warning(
                 "Password reset link for %s (SMTP not configured; deliver manually): %s",
                 target_email,
-                reset_url,
+                redacted_url,
             )
         except Exception:  # nosec B110
             pass
@@ -2222,7 +2227,7 @@ def create_app(
             audit_logger.warning(
                 "password_reset_unmailed target=%s link=%s",
                 target_email,
-                reset_url,
+                "<redacted>",
             )
         except Exception:  # nosec B110
             pass
