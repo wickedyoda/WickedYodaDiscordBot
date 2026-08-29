@@ -8305,7 +8305,17 @@ if __name__ == "__main__":
         print()
         print("Login credentials:")
         print(f"  Email:    {target_email}")
-        print(f"  Password: {new_password}")
+        # Write password to a secure temp file instead of stdout (avoids
+        # clear-text credential logging — CodeQL py/clear-text-logging-sensitive-data).
+        import stat as _stat
+        cred_path = Path(tempfile.gettempdir()) / "wickedyoda_reset_creds.txt"
+        cred_path.chmod(_stat.S_IRUSR | _stat.S_IWUSR)
+        cred_path.write_text(
+            f"Email:    {target_email}\n"
+            f"Password: {new_password}\n",
+            mode=_stat.S_IRUSR | _stat.S_IWUSR,
+        )
+        print(f"  Password: written to {cred_path} (perms 0600)")
         print()
 
         if cli_args.print_reset_link and not cli_args.create_admin_email:
