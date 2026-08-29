@@ -8,6 +8,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gosu \
+    && apt-get install -y --no-install-recommends --only-upgrade libssl3t64 openssl openssl-provider-legacy || true \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir -r requirements.txt
 
