@@ -40,6 +40,12 @@ PAGE_TEMPLATE = """\
       --bg: #f8fafc; --bg-2: #ffffff; --bg-3: #f1f5f9;
       --fg: #0f172a; --muted: #64748b; --border: #e2e8f0;
     }
+    body[data-theme="black"] {
+      --bg: #000000; --bg-2: #050505; --bg-3: #0a0a0a;
+      --fg: #ffffff; --muted: #d1d5db; --border: #334155;
+      --accent: #38bdf8; --accent-2: #7dd3fc;
+      --success: #4ade80; --warn: #fbbf24; --danger: #f87171; --info: #60a5fa;
+    }
     * { box-sizing: border-box; }
     html, body { background: var(--bg); color: var(--fg); margin: 0; }
     body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px; min-height: 100vh; }
