@@ -46,6 +46,32 @@ PAGE_TEMPLATE = """\
       --accent: #38bdf8; --accent-2: #7dd3fc;
       --success: #4ade80; --warn: #fbbf24; --danger: #f87171; --info: #60a5fa;
     }
+    body[data-theme="black"] .cc-card,
+    body[data-theme="black"] .cc-accordion,
+    body[data-theme="black"] .cc-table,
+    body[data-theme="black"] .cc-form-control {
+      background: var(--bg-2);
+      color: var(--fg);
+      border-color: var(--border);
+    }
+    body[data-theme="black"] .cc-table th,
+    body[data-theme="black"] .cc-table td {
+      color: var(--fg);
+      border-color: var(--border);
+    }
+    body[data-theme="black"] .text-body-secondary,
+    body[data-theme="black"] .table-secondary,
+    body[data-theme="black"] .table-active {
+      color: #e2e8f0 !important;
+      background-color: #1e293b !important;
+    }
+    body[data-theme="black"] input:disabled,
+    body[data-theme="black"] textarea:disabled,
+    body[data-theme="black"] select:disabled,
+    body[data-theme="black"] option:disabled {
+      color: #94a3b8 !important;
+      background-color: #0f172a !important;
+    }
     * { box-sizing: border-box; }
     html, body { background: var(--bg); color: var(--fg); margin: 0; }
     body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px; min-height: 100vh; }

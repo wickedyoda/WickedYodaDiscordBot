@@ -170,6 +170,22 @@ PAGE_TEMPLATE = """
     body[data-theme="black"] .dashboard-pill strong {
       color: #94a3b8 !important;
     }
+    body[data-theme="black"] ::placeholder {
+      color: #94a3b8 !important;
+    }
+    body[data-theme="black"] .text-body-secondary,
+    body[data-theme="black"] .table-secondary,
+    body[data-theme="black"] .table-active {
+      color: #e2e8f0 !important;
+      background-color: #1e293b !important;
+    }
+    body[data-theme="black"] input:disabled,
+    body[data-theme="black"] textarea:disabled,
+    body[data-theme="black"] select:disabled,
+    body[data-theme="black"] option:disabled {
+      color: #94a3b8 !important;
+      background-color: #0f172a !important;
+    }
     .text-secondary, .text-muted {
       color: var(--muted) !important;
     }
