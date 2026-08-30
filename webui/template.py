@@ -6,10 +6,10 @@ PAGE_TEMPLATE = """
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token }}">
   <title>{{ title }}</title>
-  <link rel="icon" href="{{ url_for('static', filename='wicked-yoda-favicon.png') }}">
-  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='wicked-yoda-avatar.png') }}">
-  <meta property="og:image" content="{{ url_for('static', filename='wicked-yoda-avatar.png') }}">
-  <meta name="twitter:image" content="{{ url_for('static', filename='wicked-yoda-avatar.png') }}">
+  <link rel="icon" id="favicon-link" href="/static/wicked-yoda-favicon-dark.png">
+  <link rel="apple-touch-icon" id="apple-icon-link" sizes="180x180" href="/static/wicked-yoda-avatar-dark.png">
+  <meta property="og:image" id="og-image" content="/static/wicked-yoda-avatar-dark.png">
+  <meta name="twitter:image" id="twitter-image" content="/static/wicked-yoda-avatar-dark.png">
   {% if page == "status_public" and status_refresh_seconds and status_refresh_seconds > 0 %}
   <meta http-equiv="refresh" content="{{ status_refresh_seconds }}">
   {% endif %}
@@ -3604,6 +3604,26 @@ PAGE_TEMPLATE = """
         document.querySelectorAll("[data-theme-choice]").forEach((btn) => {
           btn.classList.toggle("active", btn.getAttribute("data-theme-choice") === selected);
         });
+        const fav = document.getElementById('favicon-link');
+        const apple = document.getElementById('apple-icon-link');
+        const og = document.getElementById('og-image');
+        const tw = document.getElementById('twitter-image');
+        if (selected === 'light') {
+          if (fav) fav.href = '/static/wicked-yoda-favicon-light.png';
+          if (apple) apple.href = '/static/wicked-yoda-avatar-light.png';
+          if (og) og.content = '/static/wicked-yoda-avatar-light.png';
+          if (tw) tw.content = '/static/wicked-yoda-avatar-light.png';
+        } else if (selected === 'black') {
+          if (fav) fav.href = '/static/wicked-yoda-favicon-black.png';
+          if (apple) apple.href = '/static/wicked-yoda-avatar-black.png';
+          if (og) og.content = '/static/wicked-yoda-avatar-black.png';
+          if (tw) tw.content = '/static/wicked-yoda-avatar-black.png';
+        } else {
+          if (fav) fav.href = '/static/wicked-yoda-favicon-dark.png';
+          if (apple) apple.href = '/static/wicked-yoda-avatar-dark.png';
+          if (og) og.content = '/static/wicked-yoda-avatar-dark.png';
+          if (tw) tw.content = '/static/wicked-yoda-avatar-dark.png';
+        }
       }
 
       let storedTheme = fallbackTheme;
