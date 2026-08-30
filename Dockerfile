@@ -19,7 +19,7 @@ COPY webui /app/webui
 COPY dnd /app/dnd
 COPY scripts/entrypoint.sh /app/entrypoint.sh
 COPY scripts/migrate_db.sh /app/scripts/migrate_db.sh
-COPY static/ /app/static/
+COPY static/ /app/webui/static/
 RUN mkdir -p /app/data /logs /app/scripts \
     && useradd --create-home --shell /usr/sbin/nologin botuser \
     && chown -R botuser:botuser /app /logs \
