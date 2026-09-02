@@ -8,7 +8,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gosu \
-    && apt-get install -y --no-install-recommends --only-upgrade libssl3t64 openssl openssl-provider-legacy perl-base perl-Archive-Tar Storable IO-Compress libsqlite3-0 gzip libacl1 libncursesw6 libtinfo6 \
+    && apt-get install -y --no-install-recommends --only-upgrade libssl3t64 openssl openssl-provider-legacy perl-base libsqlite3-0 gzip libacl1 libncursesw6 libtinfo6 \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir -r requirements.txt
 
