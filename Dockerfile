@@ -6,9 +6,13 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 COPY requirements.txt .
-RUN apt-get update \
+RUN rm -f /etc/apt/sources.list.d/debian.sources \
+    && printf 'Types: deb\nURIs: http://deb.debian.org/debian-security\nSuites: trixie-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.pgp\n' > /etc/apt/sources.list.d/debian-security.sources \
+    && printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: trixie trixie-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.pgp\n' > /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends gosu \
     && apt-get install -y --no-install-recommends --only-upgrade libssl3t64 openssl openssl-provider-legacy perl-base libsqlite3-0 gzip libacl1 libncursesw6 libtinfo6 \
+    && apt list --installed 2>/dev/null | grep -E "libssl3t64|openssl|perl-base|libsqlite3-0|gzip|libacl1|libncursesw6|libtinfo6" \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir -r requirements.txt
 
