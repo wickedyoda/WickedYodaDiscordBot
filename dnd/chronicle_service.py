@@ -89,6 +89,8 @@ def update_chronicle(db_path: str, guild_id: int, **fields) -> None:
         values.append(v)
     values.append(int(guild_id))
     with _get_conn(db_path) as conn:
+        # nosec B608: column names validated against 'allowed' allow-list on lines 65-77
+        # all f"{k} = ?" interpolations come from a hardcoded allow-list, not user input
         conn.execute(f"UPDATE dnd_chronicles SET {', '.join(sets)} WHERE guild_id = ?", values)
         conn.commit()
 

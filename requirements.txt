@@ -9,3 +9,8 @@ python-dotenv==1.2.2
 jaraco.context==6.1.0
 openpyxl==3.1.5
 wheel==0.46.2
+gitpython==3.1.58
+gunicorn==22.0.0
+pynacl==1.6.2
+pypdf==6.16.1
+setuptools==83.0.0
