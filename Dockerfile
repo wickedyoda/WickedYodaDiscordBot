@@ -12,7 +12,6 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends gosu \
     && apt-get install -y --no-install-recommends --only-upgrade libssl3t64 openssl openssl-provider-legacy perl-base libsqlite3-0 gzip libacl1 libncursesw6 libtinfo6 \
-    && apt list --installed 2>/dev/null | grep -E "libssl3t64|openssl|perl-base|libsqlite3-0|gzip|libacl1|libncursesw6|libtinfo6" \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir --upgrade "pip>=26.1.2" \
     && pip install --no-cache-dir -r requirements.txt

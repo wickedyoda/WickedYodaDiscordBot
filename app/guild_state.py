@@ -491,17 +491,8 @@ class GuildStateManager:
                 "updated_by_email": actor_email or "unknown",
             }
             _insert_cols = ", ".join(persisted_columns)
-            _sql = (
-                "INSERT INTO guild_settings ("
-                + _insert_cols
-                + ") VALUES ("
-                + placeholders
-                + ") ON CONFLICT(guild_id) DO UPDATE SET "
-                + update_clause
-            )  # nosec B608: validated against persisted_columns
-            conn.execute(
-                _sql,
-                tuple(values_by_column[column] for column in persisted_columns),
+            _sql = "INSERT INTO guild_settings (" + _insert_cols + ") VALUES (" + placeholders + ") ON CONFLICT(guild_id) DO UPDATE SET " + update_clause  # nosec B608: validated against persisted_columns
+            conn.execute(_sql, tuple(values_by_column[column] for column in persisted_columns),
             )
             conn.commit()
 
