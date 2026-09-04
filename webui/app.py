@@ -2290,10 +2290,8 @@ def create_app(
             kwargs["snapshot"] = get_bot_snapshot() if callable(get_bot_snapshot) else {}
         gui_variant = os.environ.get("WEB_GUI_VARIANT", "classic").strip().lower()
         if gui_variant == "v1" and PAGE_TEMPLATE_V1 is not None:
-            assert PAGE_TEMPLATE_V1 is not None
             return _render_page_v1(page, title, **kwargs)
         if gui_variant == "v2" and PAGE_TEMPLATE_V2 is not None:
-            assert PAGE_TEMPLATE_V2 is not None
             return _render_page_v2(page, title, **kwargs)
         return render_template_string(
             PAGE_TEMPLATE,
@@ -2312,7 +2310,6 @@ def create_app(
 
     def _render_page_v1(page: str, title: str, **kwargs):
         """v1: Modern Sidebar Dashboard - persistent left sidebar with category groups."""
-        assert PAGE_TEMPLATE_V1 is not None
         selected_guild_id, guild_options, selected_guild_name = _selected_guild_context()
         if "snapshot" not in kwargs:
             kwargs["snapshot"] = get_bot_snapshot() if callable(get_bot_snapshot) else {}
@@ -2364,7 +2361,6 @@ def create_app(
 
     def _render_page_v2(page: str, title: str, **kwargs):
         """v2: Command Center - topbar with command palette, accordion home."""
-        assert PAGE_TEMPLATE_V2 is not None
         selected_guild_id, guild_options, selected_guild_name = _selected_guild_context()
         if "snapshot" not in kwargs:
             kwargs["snapshot"] = get_bot_snapshot() if callable(get_bot_snapshot) else {}
