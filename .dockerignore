@@ -1,17 +1,46 @@
+# Git
 .git
-.github
+.gitignore
+
+# Python
 __pycache__
-.pytest_cache
-.ruff_cache
-.mypy_cache
-.venv
-venv
-data
-logs
 *.pyc
 *.pyo
-*.pyd
-*.db
-*.sqlite
-.env
-env.env
+.venv
+venv
+env
+*.egg-info
+dist
+build
+
+# Tests
+tests/
+test/
+.pytest_cache
+.coverage
+htmlcov/
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs (keep README)
+*.md
+!README.md
+docs/
+
+# Security scan artifacts
+SecurityScanReport.md
+security-report-*/
+
+# CI/CD
+.github/
+
+# Node/webui deps
+webui/node_modules/
+webui/package-lock.json
