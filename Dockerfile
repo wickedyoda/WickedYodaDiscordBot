@@ -1,21 +1,23 @@
-FROM python:3.12-slim
-
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
+FROM python:3.12-slim AS base
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
-
-COPY requirements.txt .
 RUN rm -f /etc/apt/sources.list.d/debian.sources \
     && printf 'Types: deb\nURIs: http://deb.debian.org/debian-security\nSuites: trixie-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.pgp\n' > /etc/apt/sources.list.d/debian-security.sources \
     && printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: trixie trixie-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.pgp\n' > /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends gosu \
-    && apt-get install -y --no-install-recommends --only-upgrade libssl3t64 openssl openssl-provider-legacy perl-base libsqlite3-0 gzip libacl1 libncursesw6 libtinfo6 \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir --upgrade "pip>=26.1.2" \
+    && apt-get install -y --no-install-recommends gosu git \
+    && apt-get install -y --no-install-recommends --only-upgrade \
+         libssl3t64 openssl openssl-provider-legacy perl-base libsqlite3-0 gzip libacl1 libncursesw6 libtinfo6 \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM base AS deps
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade "pip>=26.1.2" \
     && pip install --no-cache-dir -r requirements.txt
 
+FROM base AS runtime
+COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=deps /usr/local/bin /usr/local/bin
 COPY bot.py ./
 COPY app /app/app
 COPY core /app/core
@@ -32,5 +34,4 @@ RUN mkdir -p /app/data /logs /app/scripts \
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD python -c "import os,sys,urllib.request; enabled=os.getenv('WEB_ENABLED','true').lower() in {'1','true','yes','on'}; port=os.getenv('WEB_PORT','8080'); base=f'http://127.0.0.1:{port}';\n\n\nstatus=200\nif enabled:\n    try:\n        status=urllib.request.urlopen(f'{base}/health', timeout=3).status\n        if status!=200:\n            status=urllib.request.urlopen(f'{base}/healthz', timeout=3).status\n    except Exception:\n        status=1\nsys.exit(0 if status==200 else 1)"
 
 USER botuser
-
 ENTRYPOINT ["/app/entrypoint.sh"]

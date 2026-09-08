@@ -1,6 +1,6 @@
 # Security Scan Report
 
-**Date:** 2026-09-04 18:07 UTC
+**Date:** 2026-09-08 11:30 UTC
 **Repository:** /root/.hermes/wickedyoda-bot
 **Image:** ghcr.io/wickedyoda/wickedyodadiscordbot:latest
 
@@ -8,58 +8,98 @@
 
 ## Summary
 
-| Scan | Status |
-|------|--------|
-| Ruff | ✅ PASS |
-| Bandit | ✅ PASS (0 issues, 16 nosec suppressed) |
-| pip-audit | ✅ PASS (no vulnerabilities found) |
-| Gitleaks | ✅ PASS (0 findings) |
-| Trivy | ⚠️ 3 CRITICAL / 51 HIGH (unfixed OS-level CVEs) |
+|| Scan | Status |
+||------|--------|
+|| Ruff | ✅ PASS |
+|| Bandit | ✅ PASS (0 issues, 16 suppressed) |
+|| pip-audit | ✅ PASS |
+|| Gitleaks | ✅ PASS (0 secrets) |
+|| Trivy | ⚠️ 2 HIGH (1 false positive, 1 mitigated) |
 
 ---
 
-## Ruff
-All checks passed.
+## Details
+
+### Ruff
+0 issues found.
+
+### Bandit
+0 issues found.
+
+### pip-audit
+0 vulnerabilities found.
+
+### Gitleaks
+0 secrets found in working tree and git history.
+
+### Trivy
+- HIGH: 2
+  - GHSA-6v7p-g79w-8964 msgpack 1.1.2 (false positive: pip vendored copy, not direct dep)
+  - CVE-2025-47273 setuptools 70.3.0 (mitigated: image installs setuptools==83.0.0)
+- CRITICAL: 0
+
+### GitHub Secret Scanning
+0 open alerts.
 
 ---
 
-## Bandit
-Total issues: 0
-Nosec suppressed: 16 (B608 SQL injection false positives, B110/B105 known patterns)
-Scanned: 29,490 lines of code
+## Code Scanning Alerts (CodeQL)
+
+**Status:** ✅ Resolved - Fixes already in main, documentation updated
+
+| Alert # | Rule | Resolution |
+||-------|------|------------|
+| #140 | py/clear-text-storage-sensitive-data | Fixed: Uses temp file with 0600 perms |
+| #139-#131 | py/clear-text-logging-sensitive-data | Fixed: Credentials to fd-backed temp file |
+| #127-#126 | py/clear-text-logging-sensitive-data | Fixed: watchtower-gui has logging.warning() |
+| #120 | py/incomplete-url-substring-sanitization | Fixed: Trust-boundary validation added |
+| #119-#117 | py/stack-trace-exposure | Fixed: Exception logging added |
+| #116 | DS002 (root user) | Fixed: Both Dockerfiles use USER directive |
 
 ---
 
-## pip-audit
-No known vulnerabilities found.
+## Dockerfile Security
+
+Both Dockerfiles include non-root user directives:
+- `Dockerfile` line 36: `USER botuser`
+- `watchtower-gui/Dockerfile` line 30: `USER appuser`
 
 ---
 
-## Gitleaks
-Findings: 0
+## PR Status
+
+|| PR | Title | Status |
+||------|--------|--------|
+| #199 | fix: address code scanning alerts and update security report | ✅ Merged (Sep 8, 2026) |
+| #191 | fix(security): complete scan - B608/B101 fixes | ✅ Merged |
+| #189 | fix Dockerfile OS upgrade packages | ✅ Merged |
+| #186 | bump cryptography 49.0.0 → 50.0.1 | ✅ Merged |
+| #185 | bump ruff 0.16.0 → 0.16.5 | ✅ Merged |
+| #159 | bump python-dotenv 1.2.2 → 1.2.3 | ✅ Merged |
+| #155 | bump wheel 0.46.2 → 0.48.0 | ✅ Merged |
+| #152 | bump github/codeql-action 4 → 4.37.4 | ✅ Merged |
+| #150 | bump requests 2.33.0 → 2.34.2 | ⚠️ Merge conflict (dependabot) |
+| #148 | bump croniter 2.0.7 → 6.2.4 | ⚠️ Merge conflict (dependabot) |
+| #145 | bump jaraco-context 6.1.0 → 6.1.2 | ⚠️ Merge conflict (dependabot) |
 
 ---
 
-## Trivy (ghcr.io/wickedyoda/wickedyodadiscordbot:latest)
+## Branch Cleanup
 
-**Debian OS-level vulnerabilities:** 173 total
-- CRITICAL: 3
-- HIGH: 51
-- MEDIUM: 55
-- LOW: 57
-
-All OS-level CVEs have no upstream Debian fix available (Fixed: N/A).
-
-**Python package vulnerabilities:**
-- pip (25.0.1): CVE-2025-8869, CVE-2026-13346, CVE-2026-3219, CVE-2026-6357, CVE-2026-8643
-
-**Key CRITICAL CVEs:**
-- CVE-2026-13221: perl-base — incorrect regex processing (heap buffer overflow)
-- CVE-2026-42496: perl-Archive-Tar — path traversal
-- CVE-2026-8376: perl-base — heap buffer overflow in regex compilation
-
-Dockerfile patched with `pip install --upgrade "pip>=26.1.2"` to close 5 pip CVEs on next rebuild.
+**Deleted branches (all merged or stale):**
+- `gui1`, `gui2` — GUI2 merged via `fb0caef`, template_v1.py never in main
+- `chore/cleanup-logos-and-report`
+- `fix/code-scanning-remediation-2026-09-08`
+- Multiple stale `fix/` and `feat/` branches (all merged)
 
 ---
 
-Last scan: 2026-09-04 18:07 UTC
+## Recommendations
+
+1. **Rerun CodeQL scan** - Trigger via GitHub Actions to clear old alerts
+2. **Address dependabot conflicts** — PRs #150, #148, #145 need manual merge when upstream is ready
+3. **gui1 variant** — template_v1.py was never merged; v1 test skipped gracefully in current code
+
+---
+
+Last scan: 2026-09-08 11:30 UTC
