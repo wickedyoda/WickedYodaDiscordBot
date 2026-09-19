@@ -12,14 +12,15 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   secret-scan:
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
@@ -48,7 +49,7 @@ jobs:
 
       - name: Upload Gitleaks SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v4.38.0
+        uses: github/codeql-action/upload-sarif@4bd7200e1f146b1c937cae12d258b50f41a53cf8 # v4.38.0
         with:
           sarif_file: gitleaks.sarif
 
@@ -62,9 +63,11 @@ jobs:
 
   trivy-fs:
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Trivy filesystem scan
         id: trivy_fs
@@ -93,7 +96,7 @@ jobs:
 
       - name: Upload FS scan results
         if: always()
-        uses: github/codeql-action/upload-sarif@v4.38.0
+        uses: github/codeql-action/upload-sarif@4bd7200e1f146b1c937cae12d258b50f41a53cf8 # v4.38.0
         with:
           sarif_file: trivy-fs.sarif
 
@@ -107,15 +110,17 @@ jobs:
 
   trivy-image:
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Build local image for scan
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: ./Dockerfile
@@ -150,7 +155,7 @@ jobs:
 
       - name: Upload image scan results
         if: always()
-        uses: github/codeql-action/upload-sarif@v4.38.0
+        uses: github/codeql-action/upload-sarif@4bd7200e1f146b1c937cae12d258b50f41a53cf8 # v4.38.0
         with:
           sarif_file: trivy-image.sarif
 

@@ -12,13 +12,16 @@ on:
 permissions:
   actions: read
   contents: read
-  security-events: write
 
 jobs:
   analyze:
     name: Analyze
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -26,12 +29,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.38.0
+        uses: github/codeql-action/init@4bd7200e1f146b1c937cae12d258b50f41a53cf8 # v4.38.0
         with:
           languages: ${{ matrix.language }}
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4.38.0
+        uses: github/codeql-action/analyze@4bd7200e1f146b1c937cae12d258b50f41a53cf8 # v4.38.0
