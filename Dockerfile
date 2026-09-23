@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS base
+FROM python@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9 AS base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN rm -f /etc/apt/sources.list.d/debian.sources \

@@ -86,7 +86,7 @@ def get_latest_tag(registry, repo, tag):
         if registry == "ghcr.io":
             # ghcr.io requires auth for some images; use anonymous token
             return _check_ghcr(repo, tag)
-        elif "index.docker.io" in registry or registry == "docker.io":
+        elif registry == "index.docker.io" or registry == "docker.io":
             return _check_dockerhub(repo, tag)
         else:
             return _check_generic_registry(registry, repo, tag)
@@ -293,8 +293,8 @@ def api_containers():
     try:
         containers = get_containers_with_updates()
         return jsonify({"containers": containers})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route("/update/<container_id>", methods=["POST"])
@@ -325,8 +325,8 @@ def update_container(container_id):
         c.restart()
 
         return jsonify({"status": "success", "message": f"Container {c.name} updated and restarted"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route("/schedule", methods=["POST"])
@@ -349,8 +349,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
             f.write(cron_content)
         os.chmod(CRON_FILE, 0o644)
         return jsonify({"status": "success", "schedule": schedule})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route("/schedule")
