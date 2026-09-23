@@ -261,11 +261,11 @@ def index():
             containers=containers,
             current_schedule=current_schedule,
         )
-    except Exception as e:
+    except Exception:
         return render_template(
             "dashboard.html",
             containers=[],
-            error=str(e),
+            error="Unable to load dashboard data. Please try again later.",
             current_schedule="0 */6 * * *",
         )
 
