@@ -14,4 +14,4 @@ gunicorn==22.0.0
 pynacl==1.6.2
 pypdf==6.18.1
 setuptools==84.0.0
-msgpack==1.2.1
+msgpack==1.2.2
