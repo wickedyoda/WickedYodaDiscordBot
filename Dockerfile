@@ -8,6 +8,7 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
     && apt-get install -y --no-install-recommends gosu git \
     && apt-get install -y --no-install-recommends --only-upgrade \
          libssl3t64 openssl openssl-provider-legacy perl-base libsqlite3-0 gzip libacl1 libncursesw6 libtinfo6 libpcre2-8-0 \
+         zlib1g apt libapt-pkg7.0 \
     && rm -rf /var/lib/apt/lists/*
 
 FROM base AS deps
