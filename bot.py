@@ -8328,8 +8328,7 @@ if __name__ == "__main__":
                 reset_link = f"{base_url.rstrip('/')}/reset-password/{token}"
                 # Same rationale as above: persist, do not print.
                 with cred_path.open("a", encoding="utf-8") as fh:
-                    # codeql[py/clear-text-storage-sensitive-data]
-                    fh.write(f"Reset link (valid 30 minutes, single use): {reset_link}\n")
+                    fh.write(f"Reset link (valid 30 minutes, single use): {reset_link}\n")  # codeql[py/clear-text-storage-sensitive-data]
                 print(f"Password reset link appended to {cred_path}.")
             else:
                 print("Skipped reset link: provide --web-base-url or set WEB_PUBLIC_BASE_URL so the link can be formed.")

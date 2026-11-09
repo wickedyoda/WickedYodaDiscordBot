@@ -2230,8 +2230,7 @@ def create_app(
             # Operator must read the token once to deliver it; a 0600 file is
             # the least-exposed channel available without SMTP.
             with path.open("a", encoding="utf-8") as fh:
-                # codeql[py/clear-text-storage-sensitive-data]
-                fh.write(f"Password reset link: {reset_url}\n")
+                fh.write(f"Password reset link: {reset_url}\n")  # codeql[py/clear-text-storage-sensitive-data]
             app.logger.warning(
                 "Password reset link generated but SMTP is not configured; written to %s (0600). "
                 "Deliver it manually, then delete the file.",
