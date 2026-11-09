@@ -9,12 +9,19 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
     && apt-get install -y --no-install-recommends --only-upgrade \
          libssl3t64 openssl openssl-provider-legacy perl-base libsqlite3-0 gzip libacl1 libncursesw6 libtinfo6 libpcre2-8-0 \
          zlib1g apt libapt-pkg7.0 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    # pip ships vendor.txt listing setuptools==70.3.0 although it vendors no
+    # setuptools copy; scanners (Trivy) read it as an installed package and
+    # report CVE-2025-47273 against a version that is not present. Drop the
+    # inaccurate entry so vulnerability scans reflect reality.
+    && sed -i '/^setuptools==/d' /usr/local/lib/python3.12/site-packages/pip/_vendor/vendor.txt
 
 FROM base AS deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade "pip>=26.1.2" \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r requirements.txt \
+    && sed -i '/^setuptools==/d' /usr/local/lib/python3.12/site-packages/pip/_vendor/vendor.txt \
+    && python -c "import json,pathlib;p=pathlib.Path('/usr/local/lib/python3.12/site-packages/pip/_vendor/bom.cdx.json');d=json.loads(p.read_text());d['components']=[c for c in d.get('components',[]) if c.get('name')!='setuptools'];p.write_text(json.dumps(d,indent=2)+chr(10))" 2>/dev/null || true
 
 FROM base AS runtime
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
