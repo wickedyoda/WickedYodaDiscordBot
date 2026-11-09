@@ -2229,8 +2229,8 @@ def create_app(
             path.chmod(_stat.S_IRUSR | _stat.S_IWUSR)
             # Operator must read the token once to deliver it; a 0600 file is
             # the least-exposed channel available without SMTP.
-            # codeql[py/clear-text-storage-sensitive-data]
             with path.open("a", encoding="utf-8") as fh:
+                # codeql[py/clear-text-storage-sensitive-data]
                 fh.write(f"Password reset link: {reset_url}\n")
             app.logger.warning(
                 "Password reset link generated but SMTP is not configured; written to %s (0600). "
