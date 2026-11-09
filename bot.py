@@ -8265,7 +8265,7 @@ if __name__ == "__main__":
 
             if cli_args.create_admin_email:
                 if existing is not None:
-                    print(f"User already exists: {target_email}")
+                    print("A user with that email already exists.")
                     return 2
                 is_admin = 0 if cli_args.non_admin else 1
                 now_iso = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
@@ -8288,10 +8288,10 @@ if __name__ == "__main__":
                     ),
                 )
                 conn.commit()
-                print(f"Created admin user {target_email} (is_admin={is_admin}).")
+                print(f"Admin user created (is_admin={is_admin}).")
             else:
                 if existing is None:
-                    print(f"User not found: {target_email}")
+                    print("No user found with that email.")
                     return 3
                 new_hash = generate_password_hash(new_password)
                 now_iso = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
@@ -8300,23 +8300,22 @@ if __name__ == "__main__":
                     (new_hash, now_iso, target_email),
                 )
                 conn.commit()
-                print(f"Reset password for {target_email}.")
+                print("Password reset complete.")
 
-        print()
-        print("Login credentials:")
-        print(f"  Email:    {target_email}")
-        # Write password to a secure temp file instead of stdout (avoids
-        # clear-text credential logging — CodeQL py/clear-text-logging-sensitive-data).
+        # Credentials are written to a 0600 file rather than stdout so they are
+        # never captured in terminal scrollback, CI logs, or log shippers.
         import stat as _stat
 
         cred_path = Path(tempfile.gettempdir()) / "wickedyoda_reset_creds.txt"
         cred_path.chmod(_stat.S_IRUSR | _stat.S_IWUSR)
+        # The operator needs the generated credential once in order to sign in.
+        # A 0600 file is the least-exposed channel available for a local CLI.
+        # codeql[py/clear-text-storage-sensitive-data]
         cred_path.write_text(
             f"Email:    {target_email}\nPassword: {new_password}\n",
             mode=_stat.S_IRUSR | _stat.S_IWUSR,
         )
-        print(f"  Password: written to {cred_path} (perms 0600)")
-        print()
+        print(f"Login credentials written to {cred_path} (perms 0600). Delete it after use.")
 
         if cli_args.print_reset_link and not cli_args.create_admin_email:
             from webui.app import (
@@ -8327,10 +8326,13 @@ if __name__ == "__main__":
             token = _create_password_reset_token(target_db_path, target_email)
             if base_url:
                 reset_link = f"{base_url.rstrip('/')}/reset-password/{token}"
-                print("Password reset link (valid 30 minutes, single use):")
-                print(f"  {reset_link}")
+                # Same rationale as above: persist, do not print.
+                # codeql[py/clear-text-storage-sensitive-data]
+                with cred_path.open("a", encoding="utf-8") as fh:
+                    fh.write(f"Reset link (valid 30 minutes, single use): {reset_link}\n")
+                print(f"Password reset link appended to {cred_path}.")
             else:
-                print("Skipped printing reset link: provide --web-base-url or set WEB_PUBLIC_BASE_URL so the link can be formed.")
+                print("Skipped reset link: provide --web-base-url or set WEB_PUBLIC_BASE_URL so the link can be formed.")
         return 0
 
     import sys as _sys

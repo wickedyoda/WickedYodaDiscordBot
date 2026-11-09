@@ -9,6 +9,7 @@ import secrets
 import smtplib
 import sqlite3
 import ssl
+import tempfile
 import threading
 import time
 import zipfile
@@ -2212,32 +2213,34 @@ def create_app(
     def _build_password_reset_link(raw_token: str) -> str:
         return f"{_password_reset_base_url()}{url_for('password_reset_confirm', token=raw_token)}"
 
-    def _emit_unmailed_reset_link(target_email: str, reset_url: str) -> None:
-        """Log a password reset link to bot + audit logs when SMTP is not configured.
+    def _emit_unmailed_reset_link(_target_email: str, reset_url: str) -> None:
+        """Persist an unemailed password reset link for out-of-band delivery.
 
-        The end-user does not receive the link by email in this branch, so the
-        link is written to the bot's main log file and the web audit log so an
-        operator with container shell access can deliver it out-of-band.
+        SMTP is not configured, so the end-user will not receive the link by
+        email. Rather than writing the token to the application/audit logs
+        (clear-text logging of credentials), append it to a 0600 file that an
+        operator with container access can read and deliver, then delete.
         """
+        import stat as _stat
+
         try:
-            # Redact the token from the URL before logging to avoid
-            # clear-text logging of sensitive reset tokens (CodeQL
-            # py/clear-text-logging-sensitive-data).
-            redacted_url = reset_url.split("/reset-password/")
-            redacted_url = redacted_url[0] + "/reset-password/<REDACTED>" if len(redacted_url) > 1 else "<redacted>"
+            path = Path(tempfile.gettempdir()) / "wickedyoda_password_reset_links.txt"
+            path.touch(mode=_stat.S_IRUSR | _stat.S_IWUSR, exist_ok=True)
+            path.chmod(_stat.S_IRUSR | _stat.S_IWUSR)
+            # Operator must read the token once to deliver it; a 0600 file is
+            # the least-exposed channel available without SMTP.
+            # codeql[py/clear-text-storage-sensitive-data]
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(f"Password reset link: {reset_url}\n")
             app.logger.warning(
-                "Password reset link for %s (SMTP not configured; deliver manually): %s",
-                target_email,
-                redacted_url,
+                "Password reset link generated but SMTP is not configured; written to %s (0600). "
+                "Deliver it manually, then delete the file.",
+                path,
             )
         except Exception:  # nosec B110
-            pass
+            app.logger.warning("Password reset link generated but SMTP is not configured.")
         try:
-            audit_logger.warning(
-                "password_reset_unmailed target=%s link=%s",
-                target_email,
-                "<redacted>",
-            )
+            audit_logger.warning("password_reset_unmailed")
         except Exception:  # nosec B110
             pass
 
