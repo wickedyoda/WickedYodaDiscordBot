@@ -10,10 +10,12 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build-and-push:
+    permissions:
+      contents: read
+      packages: write
     if: |
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'push'
