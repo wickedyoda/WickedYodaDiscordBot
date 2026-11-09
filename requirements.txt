@@ -12,6 +12,6 @@ wheel==0.48.0
 gitpython==3.2.1
 gunicorn==22.0.0
 pynacl==1.6.2
-pypdf==6.21.4
+pypdf==7.0.0
 setuptools==84.2.1
 msgpack==1.2.4
