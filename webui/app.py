@@ -24,6 +24,7 @@ from urllib.parse import urljoin, urlparse, urlunparse
 from flask import Flask, flash, redirect, render_template_string, request, send_file, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from app.moderation_ext import get_store as get_moderation_store
 from app.uptime_kuma_admin import (
     UptimeKumaAdminError,
     add_monitor,
@@ -1951,6 +1952,79 @@ def _read_process_io_bytes() -> dict[str, int | None]:
         elif key.strip() == "write_bytes":
             write_bytes = int(value)
     return {"read_bytes": read_bytes, "write_bytes": write_bytes}
+
+
+MODERATION_CASES_TEMPLATE = """
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Moderation Cases</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; background: #111; color: #eee; margin: 24px; }
+  h1, h2 { font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+  th, td { border-bottom: 1px solid #333; padding: 6px 8px; text-align: left; font-size: 14px; }
+  th { color: #9ad; }
+  a { color: #6cf; }
+  .muted { color: #888; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; align-items: center; }
+  input, select, button { background: #1b1b1b; color: #eee; border: 1px solid #333; padding: 6px; }
+  .pill { padding: 2px 6px; border-radius: 4px; background: #222; }
+</style>
+</head>
+<body>
+  <h1>Moderation Cases</h1>
+  <p class="muted">{{ guild_name }} — {{ rows|length }} case(s)</p>
+  <form method="get">
+    <input name="action" placeholder="action" value="{{ action }}">
+    <input name="target" placeholder="user id" value="{{ target }}">
+    <button type="submit">Filter</button>
+    <a href="{{ url_for('moderation_cases_export', action=action, target=target) }}">Export CSV</a>
+  </form>
+  <table>
+    <thead>
+      <tr><th>#</th><th>When</th><th>Action</th><th>Target</th><th>Moderator</th><th>Reason</th><th>Appeal</th></tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.case_number }}</td>
+        <td>{{ r.created_at }}</td>
+        <td><span class="pill">{{ r.action }}</span></td>
+        <td>{{ r.target_name or r.target_id }}</td>
+        <td>{{ r.moderator_name or '—' }}</td>
+        <td>{{ r.reason or '—' }}</td>
+        <td><a href="#appeals">appeal</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2 id="reports">Open reports ({{ reports|length }})</h2>
+  <table>
+    <thead><tr><th>#</th><th>When</th><th>Reporter</th><th>Target</th><th>Reason</th></tr></thead>
+    <tbody>
+      {% for r in reports %}
+      <tr><td>{{ r.id }}</td><td>{{ r.created_at }}</td><td>{{ r.reporter_name }}</td>
+      <td>{{ r.target_name }}</td><td>{{ r.reason }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2 id="appeals">Open appeals ({{ appeals|length }})</h2>
+  <table>
+    <thead><tr><th>#</th><th>When</th><th>User</th><th>Case</th><th>Message</th></tr></thead>
+    <tbody>
+      {% for a in appeals %}
+      <tr><td>{{ a.id }}</td><td>{{ a.created_at }}</td><td>{{ a.user_name }}</td>
+      <td>{{ a.case_number or '—' }}</td><td>{{ a.message }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>
+"""
 
 
 def create_app(
@@ -5101,6 +5175,76 @@ def create_app(
             guild_member_options=member_options,
             guild_members=visible_members,
             members_intent_enabled=members_intent_enabled,
+        )
+
+    @app.get("/admin/moderation/cases")
+    @login_required
+    def moderation_cases():
+        selected_guild_id, _, selected_guild_name = _selected_guild_context()
+        store = get_moderation_store(db_path)
+        action_filter = (request.args.get("action") or "").strip() or None
+        target_raw = (request.args.get("target") or "").strip()
+        target_id = int(target_raw) if target_raw.isdigit() else None
+        rows = store.list_cases(int(selected_guild_id), action=action_filter, target_id=target_id, limit=200)
+        reports = store.list_reports(int(selected_guild_id), limit=50)
+        appeals = store.list_appeals(int(selected_guild_id), limit=50)
+        return render_template_string(
+            MODERATION_CASES_TEMPLATE,
+            guild_name=selected_guild_name or str(selected_guild_id),
+            rows=rows,
+            reports=reports,
+            appeals=appeals,
+            action=action_filter or "",
+            target=target_raw,
+        )
+
+    @app.get("/admin/moderation/cases/export")
+    @login_required
+    def moderation_cases_export():
+        import csv
+
+        selected_guild_id, _, _ = _selected_guild_context()
+        store = get_moderation_store(db_path)
+        action_filter = (request.args.get("action") or "").strip() or None
+        target_raw = (request.args.get("target") or "").strip()
+        target_id = int(target_raw) if target_raw.isdigit() else None
+        rows = store.list_cases(int(selected_guild_id), action=action_filter, target_id=target_id, limit=5000)
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "case_number",
+                "created_at",
+                "action",
+                "target_id",
+                "target_name",
+                "moderator_name",
+                "reason",
+                "source",
+                "status",
+            ]
+        )
+        for row in rows:
+            writer.writerow(
+                [
+                    row.get("case_number"),
+                    row.get("created_at"),
+                    row.get("action"),
+                    row.get("target_id"),
+                    row.get("target_name"),
+                    row.get("moderator_name"),
+                    row.get("reason"),
+                    row.get("source"),
+                    row.get("status"),
+                ]
+            )
+        return (
+            buffer.getvalue(),
+            200,
+            {
+                "Content-Type": "text/csv; charset=utf-8",
+                "Content-Disposition": "attachment; filename=moderation-cases.csv",
+            },
         )
 
     @app.get("/admin/users")
