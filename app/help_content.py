@@ -158,6 +158,7 @@ HELP_WIKI_PAGE_BY_COMMAND = {
     "automod": ["Moderation-and-Logs.md", "Command-Reference.md"],
     "lockdown": ["Moderation-and-Logs.md", "Command-Reference.md"],
     "sharedban": ["Moderation-and-Logs.md", "Command-Reference.md"],
+    "resolvereport": ["Moderation-and-Logs.md", "Command-Reference.md"],
 }
 
 

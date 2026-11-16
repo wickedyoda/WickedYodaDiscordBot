@@ -201,6 +201,11 @@ COMMAND_PERMISSION_METADATA: dict[str, dict[str, str]] = {
         "description": "Manage the shared ban list",
         "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR,
     },
+    "resolvereport": {
+        "label": "/resolvereport",
+        "description": "Resolve an open report",
+        "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR,
+    },
     "addrole": {"label": "/addrole", "description": "Add role to member", "default_policy": COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR},
     "removerole": {
         "label": "/removerole",

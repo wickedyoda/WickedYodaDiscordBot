@@ -32,6 +32,7 @@ DEFAULT_BLOCKED_EXTENSIONS = (
 INVITE_PATTERN = re.compile(r"(?:discord\.(?:gg|com/invite|me)/[A-Za-z0-9\-_]+)", re.IGNORECASE)
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 EMOJI_PATTERN = re.compile("[\U0001f300-\U0001faff\u2600-\u27bf]")
+CUSTOM_EMOJI_PATTERN = re.compile(r"<a?:[A-Za-z0-9_]+:\d+>")
 ZALGO_PATTERN = re.compile(r"[\u0300-\u036f\u0489\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]")
 
 CASE_ACTIONS = (
@@ -95,6 +96,45 @@ def _int_list(raw: Any) -> list[int]:
 
 def normalize_content(content: str) -> str:
     return " ".join(str(content or "").lower().split())
+
+
+def count_emoji(content: str) -> int:
+    """Count Unicode emoji plus Discord custom/animated emoji syntax."""
+    text = str(content or "")
+    return len(EMOJI_PATTERN.findall(text)) + len(CUSTOM_EMOJI_PATTERN.findall(text))
+
+
+def chunk_text(text: str, limit: int = 1900) -> list[str]:
+    """Split text into chunks that fit inside a Discord message."""
+    value = str(text or "")
+    if len(value) <= limit:
+        return [value] if value else []
+    chunks: list[str] = []
+    current = ""
+    for line in value.splitlines():
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+        while len(line) > limit:
+            chunks.append(line[:limit])
+            line = line[limit:]
+        current = line
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def neutralize_csv_cell(value: Any) -> Any:
+    """Prevent spreadsheet formula injection in exported CSV cells."""
+    if value is None:
+        return ""
+    text = str(value)
+    if text[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + text
+    return text
 
 
 def contains_invite(content: str) -> bool:
@@ -166,17 +206,20 @@ def detect_spam(
     text = str(content or "")
     normalized = normalize_content(text)
 
-    duplicate_threshold = int(settings.get("duplicate_threshold") or 3)
+    duplicate_threshold = settings.get("duplicate_threshold")
+    duplicate_threshold = 3 if duplicate_threshold is None else int(duplicate_threshold)
     if duplicate_threshold > 0 and normalized:
         duplicates = sum(1 for item in recent_contents if normalize_content(item) == normalized)
         if duplicates + 1 >= duplicate_threshold:
             return "repeated message"
 
-    mention_limit = int(settings.get("mention_limit") or 5)
+    mention_limit = settings.get("mention_limit")
+    mention_limit = 5 if mention_limit is None else int(mention_limit)
     if mention_limit > 0 and mention_count > mention_limit:
         return f"mention spam ({mention_count} mentions)"
 
-    emoji_limit = int(settings.get("emoji_limit") or 10)
+    emoji_limit = settings.get("emoji_limit")
+    emoji_limit = 10 if emoji_limit is None else int(emoji_limit)
     if emoji_limit > 0 and emoji_count > emoji_limit:
         return f"emoji spam ({emoji_count} emoji)"
 
@@ -674,6 +717,14 @@ class ModerationStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_appeal(self, guild_id: int, appeal_id: int) -> dict | None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM mod_appeals WHERE guild_id = ? AND id = ?",
+                (int(guild_id), int(appeal_id)),
+            ).fetchone()
+        return dict(row) if row else None
+
     def resolve_appeal(self, guild_id: int, appeal_id: int, *, actor: str, response: str, status: str = "resolved") -> bool:
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
@@ -763,6 +814,15 @@ class ModerationStore:
     def save_automod_settings(self, guild_id: int, **values: Any) -> dict:
         current = self.get_automod_settings(guild_id)
         merged = {**current, **{key: value for key, value in values.items() if value is not None}}
+
+        def int_setting(key: str, default: int) -> int:
+            value = merged.get(key)
+            return default if value is None else int(value)
+
+        def float_setting(key: str, default: float) -> float:
+            value = merged.get(key)
+            return default if value is None else float(value)
+
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
@@ -813,10 +873,10 @@ class ModerationStore:
                     int(merged.get("spam_max_messages") or 5),
                     int(merged.get("spam_window_seconds") or 10),
                     int(merged.get("duplicate_enabled") or 0),
-                    int(merged.get("duplicate_threshold") or 3),
-                    int(merged.get("mention_limit") or 5),
-                    int(merged.get("emoji_limit") or 10),
-                    float(merged.get("caps_ratio") or 0.7),
+                    int_setting("duplicate_threshold", 3),
+                    int_setting("mention_limit", 5),
+                    int_setting("emoji_limit", 10),
+                    float_setting("caps_ratio", 0.7),
                     int(merged.get("invite_block") or 0),
                     int(merged.get("link_block") or 0),
                     json.dumps(merged.get("link_allowlist") or [], ensure_ascii=True),
@@ -825,7 +885,7 @@ class ModerationStore:
                     json.dumps(merged.get("exempt_channel_ids") or [], ensure_ascii=True),
                     int(merged.get("attachment_block") or 0),
                     json.dumps(merged.get("blocked_extensions") or [], ensure_ascii=True),
-                    int(merged.get("max_attachment_mb") or 25),
+                    int_setting("max_attachment_mb", 25),
                     json.dumps(merged.get("escalation") or [], ensure_ascii=True),
                     int(merged.get("quiet_hours_enabled") or 0),
                     int(merged.get("quiet_start_hour") or 22),
