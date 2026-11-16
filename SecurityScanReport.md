@@ -33,9 +33,9 @@
 0 secrets found in working tree and git history.
 
 ### Trivy
-- HIGH: 2
-  - GHSA-6v7p-g79w-8964 msgpack 1.1.2 (false positive: pip vendored copy, not direct dep)
-  - CVE-2025-47273 setuptools 70.3.0 (mitigated: image installs setuptools==83.0.0)
+- HIGH: 0
+  - GHSA-6v7p-g79w-8964 msgpack 1.1.2 — resolved: `msgpack` was an unused dependency and has been removed from `requirements.txt`
+  - CVE-2025-47273 setuptools 70.3.0 — resolved: `setuptools` was an unused dependency and has been removed from `requirements.txt`
 - CRITICAL: 0
 
 ### GitHub Secret Scanning
