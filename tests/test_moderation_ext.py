@@ -144,7 +144,9 @@ def test_store_cases_notes_warnings_reports(tmp_path):
         reason="abuse",
     )
     assert store.list_reports(1)[0]["id"] == report_id
+    assert store.get_report(1, report_id)["status"] == "open"
     assert store.resolve_report(1, report_id, actor="mod", resolution="handled") is True
+    assert store.get_report(1, report_id)["status"] == "resolved"
     assert store.list_reports(1) == []
 
 

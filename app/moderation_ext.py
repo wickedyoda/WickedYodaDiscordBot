@@ -669,6 +669,14 @@ class ModerationStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_report(self, guild_id: int, report_id: int) -> dict | None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM mod_reports WHERE guild_id = ? AND id = ?",
+                (int(guild_id), int(report_id)),
+            ).fetchone()
+        return dict(row) if row else None
+
     def resolve_report(self, guild_id: int, report_id: int, *, actor: str, resolution: str) -> bool:
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
