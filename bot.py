@@ -5692,7 +5692,7 @@ class ModerationBot(commands.Bot):
                 elif action_name == "ban":
                     await guild.ban(message.author, reason=f"automod: {reason}", delete_message_seconds=86400)
                     action_taken = "banned"
-            except (discord.Forbidden, discord.HTTPException, ValueError, TypeError):
+            except (discord.Forbidden, discord.HTTPException, ValueError, TypeError, OverflowError):
                 action_taken = "action failed"
 
         try:
@@ -8371,21 +8371,27 @@ class ReportActionView(discord.ui.View):
             return False
         report = MOD_STORE.get_report(self.guild_id, self.report_id)
         if report is None or str(report.get("status") or "") != "open":
-            for child in self.children:
-                child.disabled = True
-            try:
-                if interaction.response.is_done():
-                    await interaction.edit_original_response(view=self)
-                else:
-                    await interaction.response.edit_message(view=self)
-            except discord.HTTPException:
-                pass
-            try:
-                await interaction.followup.send("This report is already resolved.", ephemeral=True)
-            except discord.HTTPException:
-                pass
+            await self._reject_closed(interaction, "This report is already resolved.")
+            return False
+        if not MOD_STORE.claim_report(self.guild_id, self.report_id, _mod_actor_name(interaction)):
+            await self._reject_closed(interaction, "This report is already being handled.")
             return False
         return True
+
+    async def _reject_closed(self, interaction: discord.Interaction, message: str) -> None:
+        for child in self.children:
+            child.disabled = True
+        try:
+            if interaction.response.is_done():
+                await interaction.edit_original_response(view=self)
+            else:
+                await interaction.response.edit_message(view=self)
+        except discord.HTTPException:
+            pass
+        try:
+            await interaction.followup.send(message, ephemeral=True)
+        except discord.HTTPException:
+            pass
 
     async def _finish(self, interaction: discord.Interaction, resolution: str) -> None:
         MOD_STORE.resolve_report(self.guild_id, self.report_id, actor=_mod_actor_name(interaction), resolution=resolution)
@@ -8402,6 +8408,7 @@ class ReportActionView(discord.ui.View):
             return
         guild = interaction.guild
         if guild is None:
+            MOD_STORE.release_report(self.guild_id, self.report_id)
             return
         await interaction.response.defer(ephemeral=True)
         cutoff = discord.utils.utcnow() - timedelta(days=1)
@@ -8423,11 +8430,13 @@ class ReportActionView(discord.ui.View):
         guild = interaction.guild
         member = guild.get_member(self.target_id) if guild else None
         if member is None:
+            MOD_STORE.release_report(self.guild_id, self.report_id)
             await interaction.response.send_message("Member is no longer in the server.", ephemeral=True)
             return
         try:
             await member.edit(timed_out_until=discord.utils.utcnow() + timedelta(hours=1), reason=f"Report #{self.report_id}")
         except (discord.Forbidden, discord.HTTPException) as exc:
+            MOD_STORE.release_report(self.guild_id, self.report_id)
             await interaction.response.send_message(f"Could not timeout member: {exc}", ephemeral=True)
             return
         await self._finish(interaction, "member timed out 1h")
@@ -8438,10 +8447,12 @@ class ReportActionView(discord.ui.View):
             return
         guild = interaction.guild
         if guild is None:
+            MOD_STORE.release_report(self.guild_id, self.report_id)
             return
         try:
             await guild.ban(discord.Object(id=self.target_id), reason=f"Report #{self.report_id}", delete_message_seconds=86400)
         except (discord.Forbidden, discord.HTTPException) as exc:
+            MOD_STORE.release_report(self.guild_id, self.report_id)
             await interaction.response.send_message(f"Could not ban member: {exc}", ephemeral=True)
             return
         await self._finish(interaction, "member banned")
@@ -8845,6 +8856,7 @@ async def resolveappeal(
         await reply_ephemeral(interaction, "This command can only be used in a server.")
         return
     status = "accepted" if accepted else "denied"
+    await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
     appeal_row = MOD_STORE.get_appeal(interaction.guild.id, appeal_id)
     if MOD_STORE.resolve_appeal(interaction.guild.id, appeal_id, actor=_mod_actor_name(interaction), response=response, status=status):
         if appeal_row:
@@ -8879,6 +8891,9 @@ async def resolvereport(
         return
     if interaction.guild is None:
         await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    if not MOD_STORE.claim_report(interaction.guild.id, report_id, _mod_actor_name(interaction)):
+        await reply_ephemeral(interaction, f"Report `#{report_id}` is not open.")
         return
     if MOD_STORE.resolve_report(interaction.guild.id, report_id, actor=_mod_actor_name(interaction), resolution=resolution):
         await reply_ephemeral(interaction, f"Report `#{report_id}` resolved.")
@@ -8968,8 +8983,8 @@ async def automod(
                     minutes = int(rung.get("minutes"))
                 except (TypeError, ValueError):
                     return "Timeout rungs need integer minutes."
-                if minutes < 1:
-                    return "Timeout minutes must be at least 1."
+                if not 1 <= minutes <= 40320:
+                    return "Timeout minutes must be between 1 and 40320 (28 days)."
         return None
 
     updates: dict[str, object] = {}
