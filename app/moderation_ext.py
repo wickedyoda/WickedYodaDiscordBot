@@ -669,6 +669,39 @@ class ModerationStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_report(self, guild_id: int, report_id: int) -> dict | None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM mod_reports WHERE guild_id = ? AND id = ?",
+                (int(guild_id), int(report_id)),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def claim_report(self, guild_id: int, report_id: int, actor: str) -> bool:
+        """Atomically claim an open report so only one moderator can action it."""
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE mod_reports
+                SET status = 'claimed', resolved_by = ?
+                WHERE guild_id = ? AND id = ? AND status = 'open'
+                """,
+                (str(actor or ""), int(guild_id), int(report_id)),
+            )
+            return cursor.rowcount > 0
+
+    def release_report(self, guild_id: int, report_id: int) -> bool:
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE mod_reports
+                SET status = 'open', resolved_by = NULL
+                WHERE guild_id = ? AND id = ? AND status = 'claimed'
+                """,
+                (int(guild_id), int(report_id)),
+            )
+            return cursor.rowcount > 0
+
     def resolve_report(self, guild_id: int, report_id: int, *, actor: str, resolution: str) -> bool:
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
