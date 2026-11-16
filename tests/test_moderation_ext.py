@@ -5,12 +5,15 @@ from datetime import UTC, datetime
 from app.moderation_ext import (
     ModerationStore,
     attachment_violation,
+    chunk_text,
     contains_invite,
+    count_emoji,
     detect_spam,
     escalation_action,
     extract_urls,
     in_quiet_hours,
     match_regex_rules,
+    neutralize_csv_cell,
     url_allowed,
 )
 
@@ -80,6 +83,36 @@ def test_in_quiet_hours_wraps_midnight():
     assert not in_quiet_hours(datetime(2026, 1, 1, 12, tzinfo=UTC), 22, 7)
 
 
+def test_count_emoji_includes_custom_and_unicode():
+    assert count_emoji("😀😀") == 2
+    assert count_emoji("<:party:123456789>") == 1
+    assert count_emoji("<a:dance:987654321>") == 1
+    assert count_emoji("😀 <:party:123456789> <a:dance:987654321>") == 3
+    assert count_emoji("plain text") == 0
+
+
+def test_zero_mention_limit_disables_the_check():
+    settings = {"duplicate_threshold": 3, "mention_limit": 0, "emoji_limit": 10, "caps_ratio": 0.7}
+    assert detect_spam(content="hi", recent_contents=[], mention_count=20, emoji_count=0, settings=settings) is None
+
+
+def test_chunk_text_respects_limit():
+    text = "\n".join(f"line {index}" for index in range(500))
+    chunks = chunk_text(text, limit=200)
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 200 for chunk in chunks)
+    assert "\n".join(chunks) == text
+
+
+def test_neutralize_csv_cell_blocks_formulas():
+    assert neutralize_csv_cell("=cmd|' /C calc'!A0").startswith("'")
+    assert neutralize_csv_cell("+1").startswith("'")
+    assert neutralize_csv_cell("-2").startswith("'")
+    assert neutralize_csv_cell("@SUM(A1)").startswith("'")
+    assert neutralize_csv_cell("normal") == "normal"
+    assert neutralize_csv_cell(None) == ""
+
+
 def test_store_cases_notes_warnings_reports(tmp_path):
     store = ModerationStore(str(tmp_path / "mod.db"))
     first = store.create_case(guild_id=1, action="warn", target_id=42, target_name="user", reason="spam")
@@ -119,6 +152,7 @@ def test_store_appeals_and_shared_bans(tmp_path):
     store = ModerationStore(str(tmp_path / "mod.db"))
     appeal_id = store.create_appeal(guild_id=1, user_id=42, user_name="user", case_number=3, message="please")
     assert store.list_appeals(1)[0]["id"] == appeal_id
+    assert store.get_appeal(1, appeal_id)["user_id"] == 42
     assert store.resolve_appeal(1, appeal_id, actor="mod", response="denied") is True
     assert store.list_appeals(1) == []
 

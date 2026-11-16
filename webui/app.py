@@ -25,6 +25,7 @@ from flask import Flask, flash, redirect, render_template_string, request, send_
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.moderation_ext import get_store as get_moderation_store
+from app.moderation_ext import neutralize_csv_cell
 from app.uptime_kuma_admin import (
     UptimeKumaAdminError,
     add_monitor,
@@ -5181,6 +5182,16 @@ def create_app(
     @login_required
     def moderation_cases():
         selected_guild_id, _, selected_guild_name = _selected_guild_context()
+        if selected_guild_id is None:
+            return render_template_string(
+                MODERATION_CASES_TEMPLATE,
+                guild_name="No guild selected",
+                rows=[],
+                reports=[],
+                appeals=[],
+                action="",
+                target="",
+            )
         store = get_moderation_store(db_path)
         action_filter = (request.args.get("action") or "").strip() or None
         target_raw = (request.args.get("target") or "").strip()
@@ -5204,6 +5215,8 @@ def create_app(
         import csv
 
         selected_guild_id, _, _ = _selected_guild_context()
+        if selected_guild_id is None:
+            return ("No guild selected", 400, {"Content-Type": "text/plain; charset=utf-8"})
         store = get_moderation_store(db_path)
         action_filter = (request.args.get("action") or "").strip() or None
         target_raw = (request.args.get("target") or "").strip()
@@ -5227,15 +5240,15 @@ def create_app(
         for row in rows:
             writer.writerow(
                 [
-                    row.get("case_number"),
-                    row.get("created_at"),
-                    row.get("action"),
-                    row.get("target_id"),
-                    row.get("target_name"),
-                    row.get("moderator_name"),
-                    row.get("reason"),
-                    row.get("source"),
-                    row.get("status"),
+                    neutralize_csv_cell(row.get("case_number")),
+                    neutralize_csv_cell(row.get("created_at")),
+                    neutralize_csv_cell(row.get("action")),
+                    neutralize_csv_cell(row.get("target_id")),
+                    neutralize_csv_cell(row.get("target_name")),
+                    neutralize_csv_cell(row.get("moderator_name")),
+                    neutralize_csv_cell(row.get("reason")),
+                    neutralize_csv_cell(row.get("source")),
+                    neutralize_csv_cell(row.get("status")),
                 ]
             )
         return (
