@@ -40,6 +40,17 @@ from app.fun_data import (
     YODA_WISDOM_EXTENDED,
 )
 from app.interactive_games import GuessTheNumberView, RockPaperScissorsView, TriviaView
+from app.moderation_ext import (
+    EMOJI_PATTERN,
+    ModerationStore,
+    attachment_violation,
+    contains_invite,
+    detect_spam,
+    escalation_action,
+    extract_urls,
+    match_regex_rules,
+    url_allowed,
+)
 from app.translation import TranslationStore, get_lang_for_flag
 from core.bot_constants import (
     COMMAND_PERMISSION_DEFAULT_POLICY_MODERATOR,
@@ -4055,6 +4066,7 @@ LOG_DIR = resolve_log_dir(ACTION_DB_PATH)
 BOT_LOG_FILE, BOT_CHANNEL_LOG_FILE, CONTAINER_ERROR_LOG_FILE = configure_runtime_logging(LOG_DIR)
 write_startup_log_files(LOG_DIR, [BOT_LOG_FILE, BOT_CHANNEL_LOG_FILE, CONTAINER_ERROR_LOG_FILE])
 ACTION_STORE = ActionStore(ACTION_DB_PATH)
+MOD_STORE = ModerationStore(ACTION_DB_PATH)
 COOKIE_STORE = CookieStore(ACTION_DB_PATH)
 ACHIEVEMENT_STORE = AchievementStore(ACTION_DB_PATH)
 TRANSLATION_STORE = TranslationStore(ACTION_DB_PATH)
@@ -5575,6 +5587,209 @@ class ModerationBot(commands.Bot):
             "members_intent_enabled": ENABLE_MEMBERS_INTENT,
         }
 
+    async def _run_automod(self, message: discord.Message) -> None:
+        """Apply the extended automod rules to a message."""
+        guild = message.guild
+        if guild is None or not isinstance(message.author, discord.Member) or message.author.bot:
+            return
+        if message.author.guild_permissions.administrator or message.author.guild_permissions.manage_messages:
+            return
+        settings = MOD_STORE.get_automod_settings(guild.id)
+        if not int(settings.get("enabled") or 0):
+            return
+        if message.channel.id in (settings.get("exempt_channel_ids") or []):
+            return
+        exempt_roles = set(settings.get("exempt_role_ids") or [])
+        if exempt_roles and any(role.id in exempt_roles for role in message.author.roles):
+            return
+
+        reason: str | None = None
+        if int(settings.get("invite_block") or 0) and contains_invite(message.content):
+            reason = "Discord invite"
+        if reason is None and int(settings.get("link_block") or 0):
+            allowlist = settings.get("link_allowlist") or []
+            for url in extract_urls(message.content):
+                if not url_allowed(url, allowlist):
+                    reason = "unauthorised link"
+                    break
+        if reason is None:
+            reason = match_regex_rules(message.content, settings.get("regex_rules") or [])
+        if reason is None and int(settings.get("attachment_block") or 0):
+            attachments = [{"filename": item.filename, "size": item.size} for item in message.attachments]
+            reason = attachment_violation(
+                attachments,
+                settings.get("blocked_extensions") or [],
+                int(settings.get("max_attachment_mb") or 25),
+            )
+        if reason is None and int(settings.get("spam_enabled") or 0):
+            recent: list[str] = []
+            try:
+                async for previous in message.channel.history(limit=int(settings.get("spam_max_messages") or 5) + 1, before=message):
+                    if previous.author.id == message.author.id:
+                        recent.append(previous.content or "")
+            except (discord.Forbidden, discord.HTTPException):
+                recent = []
+            reason = detect_spam(
+                content=message.content or "",
+                recent_contents=recent,
+                mention_count=len(message.mentions),
+                emoji_count=len(EMOJI_PATTERN.findall(message.content or "")),
+                settings=settings,
+            )
+
+        lockdown = MOD_STORE.get_lockdown(guild.id)
+        if reason is None and int(lockdown.get("active") or 0):
+            account_age_hours = (datetime.now(UTC) - message.author.created_at).total_seconds() / 3600
+            if account_age_hours < float(settings.get("raid_min_account_age_hours") or 24):
+                reason = "message during lockdown from a new account"
+
+        if reason is None:
+            return
+
+        try:
+            await message.delete()
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+        case_number = MOD_STORE.create_case(
+            guild_id=guild.id,
+            action="automod",
+            target_id=message.author.id,
+            target_name=str(message.author.display_name),
+            moderator_id=None,
+            moderator_name="automod",
+            reason=reason,
+            channel_id=message.channel.id,
+            message_id=message.id,
+            source="automod",
+        )
+
+        ladder = settings.get("escalation") or []
+        since = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+        offence_count = MOD_STORE.count_cases(guild.id, message.author.id, "automod", since=since)
+        rung = escalation_action(offence_count, ladder)
+        action_taken = "message removed"
+        if rung:
+            action_name = str(rung.get("action") or "").lower()
+            try:
+                if action_name == "timeout":
+                    minutes = int(rung.get("minutes") or 10)
+                    await message.author.edit(
+                        timed_out_until=datetime.now(UTC) + timedelta(minutes=minutes),
+                        reason=f"automod: {reason}",
+                    )
+                    action_taken = f"timed out {minutes}m"
+                elif action_name == "kick":
+                    await message.author.kick(reason=f"automod: {reason}")
+                    action_taken = "kicked"
+                elif action_name == "ban":
+                    await guild.ban(message.author, reason=f"automod: {reason}", delete_message_seconds=86400)
+                    action_taken = "banned"
+            except (discord.Forbidden, discord.HTTPException):
+                action_taken = "action failed"
+
+        try:
+            await message.author.send(
+                f"Your message in **{guild.name}** was removed: {reason}. Case #{case_number}. Action: {action_taken}."
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+        await log_action(
+            self,
+            "Automod",
+            f"Action: `automod`\nStatus: **Success**\nTarget: {message.author.mention}\n"
+            f"Reason: {reason}\nCase: `#{case_number}`\nResult: {action_taken}",
+            discord.Color.orange(),
+            guild_id=guild.id,
+        )
+
+    async def on_member_join(self, member: discord.Member) -> None:
+        guild = member.guild
+        managed_ids = {guild_item.id for guild_item in self.get_managed_guilds()}
+        if guild.id not in managed_ids:
+            return
+        account_age_hours = (datetime.now(UTC) - member.created_at).total_seconds() / 3600
+        MOD_STORE.record_join(guild.id, member.id, account_age_hours)
+        MOD_STORE.prune_raid_joins(guild.id)
+
+        shared = MOD_STORE.get_shared_ban(member.id)
+        if shared:
+            try:
+                await guild.ban(member, reason=f"shared ban: {shared.get('reason') or 'no reason'}")
+                await log_action(
+                    self,
+                    "Shared Ban",
+                    f"Action: `sharedban`\nStatus: **Success**\nTarget: {member.mention}\nReason: {shared.get('reason') or 'no reason'}",
+                    discord.Color.dark_red(),
+                    guild_id=guild.id,
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+            return
+
+        settings = MOD_STORE.get_automod_settings(guild.id)
+        if not int(settings.get("raid_enabled") or 0):
+            return
+
+        quarantine_role_id = settings.get("quarantine_role_id")
+        min_age = float(settings.get("raid_min_account_age_hours") or 24)
+        if quarantine_role_id and account_age_hours < min_age:
+            role = guild.get_role(int(quarantine_role_id))
+            if role is not None:
+                try:
+                    await member.add_roles(role, reason="quarantine: new account")
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
+
+        window = int(settings.get("raid_window_seconds") or 60)
+        threshold = int(settings.get("raid_join_threshold") or 10)
+        recent_joins = MOD_STORE.recent_join_count(guild.id, window)
+        if recent_joins >= threshold:
+            MOD_STORE.set_lockdown(
+                guild.id,
+                active=True,
+                reason=f"automatic raid detection ({recent_joins} joins in {window}s)",
+                actor="automod",
+                minutes=30,
+            )
+            await log_action(
+                self,
+                "Raid Protection",
+                f"Action: `lockdown`\nStatus: **Success**\n"
+                f"Reason: {recent_joins} joins in {window}s (threshold {threshold})\n"
+                "Lockdown auto-expires in 30 minutes.",
+                discord.Color.red(),
+                guild_id=guild.id,
+            )
+
+    async def on_audit_log_entry_create(self, entry: discord.AuditLogEntry) -> None:
+        guild = entry.guild
+        if guild is None:
+            return
+        managed_ids = {guild_item.id for guild_item in self.get_managed_guilds()}
+        if guild.id not in managed_ids:
+            return
+        watched = {
+            discord.AuditLogAction.ban,
+            discord.AuditLogAction.unban,
+            discord.AuditLogAction.kick,
+            discord.AuditLogAction.member_role_update,
+            discord.AuditLogAction.channel_update,
+            discord.AuditLogAction.message_delete,
+        }
+        if entry.action not in watched:
+            return
+        actor = str(entry.user) if entry.user else "unknown"
+        target = str(entry.target) if entry.target else "unknown"
+        await log_action(
+            self,
+            "Audit Log",
+            f"Action: `{entry.action.name}`\nActor: {actor}\nTarget: {target}\nReason: {entry.reason or 'none'}",
+            discord.Color.dark_grey(),
+            guild_id=guild.id,
+        )
+
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
             return
@@ -5598,6 +5813,7 @@ class ModerationBot(commands.Bot):
                 logger=logger,
                 bot_client=self,
             )
+            await self._run_automod(message)
         if isinstance(message.author, discord.Member) and message.guild and message.guild.id in managed_ids:
             content = (message.content or "").strip()
             if content.startswith("!"):
@@ -8061,6 +8277,620 @@ async def unban(interaction: discord.Interaction, user_id: str, reason: str | No
     except Exception as exc:
         await reply_ephemeral(interaction, f"Failed to unban user: {exc}")
         await log_interaction(interaction, action="unban", reason=f"{target_user_id}: {exc}", success=False)
+
+
+def _mod_case_summary(case: dict) -> str:
+    target = case.get("target_name") or case.get("target_id") or "unknown"
+    reason = case.get("reason") or "no reason provided"
+    return f"`#{case.get('case_number')}` **{case.get('action')}** — {target} — {reason} ({case.get('created_at')})"
+
+
+def _mod_actor_name(interaction: discord.Interaction) -> str:
+    user = interaction.user
+    return str(getattr(user, "display_name", None) or getattr(user, "name", "") or user.id)
+
+
+async def _create_mod_case(
+    interaction: discord.Interaction,
+    *,
+    action: str,
+    target: discord.abc.User | None,
+    reason: str,
+    duration_minutes: int | None = None,
+    source: str = "command",
+) -> int:
+    guild_id = interaction.guild.id if interaction.guild else GUILD_ID
+    return MOD_STORE.create_case(
+        guild_id=guild_id,
+        action=action,
+        target_id=getattr(target, "id", None),
+        target_name=str(getattr(target, "display_name", None) or getattr(target, "name", "") or ""),
+        moderator_id=getattr(interaction.user, "id", None),
+        moderator_name=_mod_actor_name(interaction),
+        reason=reason,
+        duration_minutes=duration_minutes,
+        channel_id=getattr(interaction.channel, "id", None),
+        source=source,
+    )
+
+
+class ReportActionView(discord.ui.View):
+    """Moderator buttons attached to a report posted in the mod-log channel."""
+
+    def __init__(self, *, guild_id: int, report_id: int, target_id: int) -> None:
+        super().__init__(timeout=86400)
+        self.guild_id = guild_id
+        self.report_id = report_id
+        self.target_id = target_id
+
+    async def _guard(self, interaction: discord.Interaction) -> bool:
+        if not isinstance(interaction.user, discord.Member) or not is_moderator_member(interaction.user):
+            await interaction.response.send_message("Only moderators can action reports.", ephemeral=True)
+            return False
+        return True
+
+    async def _finish(self, interaction: discord.Interaction, resolution: str) -> None:
+        MOD_STORE.resolve_report(self.guild_id, self.report_id, actor=_mod_actor_name(interaction), resolution=resolution)
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(view=self)
+
+    @discord.ui.button(label="Delete messages", style=discord.ButtonStyle.secondary)
+    async def delete_messages(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        if not await self._guard(interaction):
+            return
+        guild = interaction.guild
+        if guild is None:
+            return
+        member = guild.get_member(self.target_id)
+        if member is not None:
+            for channel in guild.text_channels:
+                try:
+                    await channel.purge(
+                        limit=50, check=lambda m: m.author.id == self.target_id, after=discord.utils.utcnow() - timedelta(days=1)
+                    )
+                except (discord.Forbidden, discord.HTTPException):
+                    continue
+        await self._finish(interaction, "messages deleted")
+
+    @discord.ui.button(label="Timeout 1h", style=discord.ButtonStyle.primary)
+    async def timeout_member(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        if not await self._guard(interaction):
+            return
+        guild = interaction.guild
+        member = guild.get_member(self.target_id) if guild else None
+        if member is None:
+            await interaction.response.send_message("Member is no longer in the server.", ephemeral=True)
+            return
+        try:
+            await member.edit(timed_out_until=discord.utils.utcnow() + timedelta(hours=1), reason=f"Report #{self.report_id}")
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            await interaction.response.send_message(f"Could not timeout member: {exc}", ephemeral=True)
+            return
+        await self._finish(interaction, "member timed out 1h")
+
+    @discord.ui.button(label="Ban", style=discord.ButtonStyle.danger)
+    async def ban_member(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        if not await self._guard(interaction):
+            return
+        guild = interaction.guild
+        if guild is None:
+            return
+        try:
+            await guild.ban(discord.Object(id=self.target_id), reason=f"Report #{self.report_id}", delete_message_seconds=86400)
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            await interaction.response.send_message(f"Could not ban member: {exc}", ephemeral=True)
+            return
+        await self._finish(interaction, "member banned")
+
+    @discord.ui.button(label="Ignore", style=discord.ButtonStyle.secondary)
+    async def ignore(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        if not await self._guard(interaction):
+            return
+        await self._finish(interaction, "ignored")
+
+
+@bot.tree.command(name="warn", description="Warn a member and record it.")
+@app_commands.checks.has_permissions(moderate_members=True)
+@app_commands.describe(member="Member to warn", reason="Reason for the warning")
+async def warn(interaction: discord.Interaction, member: discord.Member, reason: str) -> None:
+    if not await ensure_interaction_command_access(interaction, "warn"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    case_number = await _create_mod_case(interaction, action="warn", target=member, reason=reason)
+    MOD_STORE.add_warning(
+        guild_id=interaction.guild.id,
+        user_id=member.id,
+        moderator_id=interaction.user.id,
+        moderator_name=_mod_actor_name(interaction),
+        reason=reason,
+        case_number=case_number,
+    )
+    try:
+        await member.send(f"You were warned in **{interaction.guild.name}**: {reason} (case #{case_number})")
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+    await reply_ephemeral(interaction, f"Warned {member.mention} — case `#{case_number}`.")
+    await log_interaction(interaction, action="warn", target=member, reason=f"#{case_number}: {reason}", success=True)
+
+
+@bot.tree.command(name="warnings", description="List a member's warnings.")
+@app_commands.checks.has_permissions(moderate_members=True)
+@app_commands.describe(member="Member to inspect")
+async def warnings(interaction: discord.Interaction, member: discord.Member) -> None:
+    if not await ensure_interaction_command_access(interaction, "warnings"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    rows = MOD_STORE.list_warnings(interaction.guild.id, member.id)
+    if not rows:
+        await reply_ephemeral(interaction, f"{member.mention} has no warnings.")
+        return
+    lines = [f"`#{row['id']}` {row['created_at']} — {row['reason']} (by {row['moderator_name'] or 'unknown'})" for row in rows[:20]]
+    await reply_ephemeral(interaction, f"Warnings for {member.mention} ({len(rows)}):\n" + "\n".join(lines))
+
+
+@bot.tree.command(name="clearwarnings", description="Clear all warnings for a member.")
+@app_commands.checks.has_permissions(moderate_members=True)
+@app_commands.describe(member="Member whose warnings should be cleared")
+async def clearwarnings(interaction: discord.Interaction, member: discord.Member) -> None:
+    if not await ensure_interaction_command_access(interaction, "clearwarnings"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    removed = MOD_STORE.clear_warnings(interaction.guild.id, member.id)
+    await reply_ephemeral(interaction, f"Cleared {removed} warning(s) for {member.mention}.")
+    await log_interaction(interaction, action="clearwarnings", target=member, reason=f"cleared {removed}", success=True)
+
+
+@bot.tree.command(name="softban", description="Ban then immediately unban a member to purge their messages.")
+@app_commands.checks.has_permissions(ban_members=True)
+@app_commands.describe(member="Member to softban", reason="Reason", delete_days="Days of messages to delete (0-7)")
+async def softban(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    reason: str = "No reason provided",
+    delete_days: app_commands.Range[int, 0, 7] = 1,
+) -> None:
+    if not await ensure_interaction_command_access(interaction, "softban"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    try:
+        await interaction.guild.ban(member, reason=f"softban: {reason}", delete_message_seconds=delete_days * 86400)
+        await interaction.guild.unban(discord.Object(id=member.id), reason=f"softban release: {reason}")
+        case_number = await _create_mod_case(interaction, action="softban", target=member, reason=reason)
+        await reply_ephemeral(interaction, f"Softbanned {member.mention} — case `#{case_number}`.")
+        await log_interaction(interaction, action="softban", target=member, reason=f"#{case_number}: {reason}", success=True)
+    except Exception as exc:
+        await reply_ephemeral(interaction, f"Failed to softban member: {exc}")
+        await log_interaction(interaction, action="softban", target=member, reason=str(exc), success=False)
+
+
+@bot.tree.command(name="slowmode", description="Set slowmode for the current channel.")
+@app_commands.checks.has_permissions(manage_channels=True)
+@app_commands.describe(seconds="Slowmode in seconds (0 disables)", channel="Channel to update (defaults to current)")
+async def slowmode(
+    interaction: discord.Interaction,
+    seconds: app_commands.Range[int, 0, 21600],
+    channel: discord.TextChannel | None = None,
+) -> None:
+    if not await ensure_interaction_command_access(interaction, "slowmode"):
+        return
+    target = channel or interaction.channel
+    if not isinstance(target, discord.TextChannel):
+        await reply_ephemeral(interaction, "This command requires a text channel.")
+        return
+    try:
+        await target.edit(slowmode_delay=int(seconds), reason=f"slowmode by {_mod_actor_name(interaction)}")
+        await reply_ephemeral(interaction, f"Set slowmode in {target.mention} to {seconds}s.")
+        await log_interaction(interaction, action="slowmode", reason=f"{target.id}: {seconds}s", success=True)
+    except Exception as exc:
+        await reply_ephemeral(interaction, f"Failed to set slowmode: {exc}")
+
+
+@bot.tree.command(name="lock", description="Prevent @everyone from sending messages in a channel.")
+@app_commands.checks.has_permissions(manage_channels=True)
+@app_commands.describe(channel="Channel to lock (defaults to current)", reason="Reason")
+async def lock(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel | None = None,
+    reason: str = "No reason provided",
+) -> None:
+    if not await ensure_interaction_command_access(interaction, "lock"):
+        return
+    target = channel or interaction.channel
+    if not isinstance(target, discord.TextChannel) or interaction.guild is None:
+        await reply_ephemeral(interaction, "This command requires a text channel in a server.")
+        return
+    try:
+        await target.set_permissions(interaction.guild.default_role, send_messages=False, reason=f"lock: {reason}")
+        await reply_ephemeral(interaction, f"Locked {target.mention}.")
+        await log_interaction(interaction, action="lock", reason=f"{target.id}: {reason}", success=True)
+    except Exception as exc:
+        await reply_ephemeral(interaction, f"Failed to lock channel: {exc}")
+
+
+@bot.tree.command(name="unlock", description="Restore @everyone send permission in a channel.")
+@app_commands.checks.has_permissions(manage_channels=True)
+@app_commands.describe(channel="Channel to unlock (defaults to current)", reason="Reason")
+async def unlock(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel | None = None,
+    reason: str = "No reason provided",
+) -> None:
+    if not await ensure_interaction_command_access(interaction, "unlock"):
+        return
+    target = channel or interaction.channel
+    if not isinstance(target, discord.TextChannel) or interaction.guild is None:
+        await reply_ephemeral(interaction, "This command requires a text channel in a server.")
+        return
+    try:
+        await target.set_permissions(interaction.guild.default_role, send_messages=None, reason=f"unlock: {reason}")
+        await reply_ephemeral(interaction, f"Unlocked {target.mention}.")
+        await log_interaction(interaction, action="unlock", reason=f"{target.id}: {reason}", success=True)
+    except Exception as exc:
+        await reply_ephemeral(interaction, f"Failed to unlock channel: {exc}")
+
+
+@bot.tree.command(name="note", description="Add a staff-only note to a member.")
+@app_commands.checks.has_permissions(moderate_members=True)
+@app_commands.describe(member="Member to annotate", text="Note text")
+async def note(interaction: discord.Interaction, member: discord.Member, text: str) -> None:
+    if not await ensure_interaction_command_access(interaction, "note"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    note_id = MOD_STORE.add_note(
+        guild_id=interaction.guild.id,
+        target_id=member.id,
+        author_id=interaction.user.id,
+        author_name=_mod_actor_name(interaction),
+        note=text,
+    )
+    await reply_ephemeral(interaction, f"Note `#{note_id}` added for {member.mention}.")
+    await log_interaction(interaction, action="note", target=member, reason=f"#{note_id}: {text}", success=True)
+
+
+@bot.tree.command(name="case", description="Show a moderation case by number.")
+@app_commands.checks.has_permissions(moderate_members=True)
+@app_commands.describe(case_number="Case number")
+async def case(interaction: discord.Interaction, case_number: int) -> None:
+    if not await ensure_interaction_command_access(interaction, "case"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    row = MOD_STORE.get_case(interaction.guild.id, case_number)
+    if row is None:
+        await reply_ephemeral(interaction, f"Case `#{case_number}` not found.")
+        return
+    await reply_ephemeral(
+        interaction,
+        f"**Case #{row['case_number']}**\n"
+        f"Action: `{row['action']}`\n"
+        f"Target: {row['target_name'] or row['target_id']}\n"
+        f"Moderator: {row['moderator_name'] or 'unknown'}\n"
+        f"Reason: {row['reason'] or 'none'}\n"
+        f"Created: {row['created_at']}\n"
+        f"Source: {row['source']}",
+    )
+
+
+@bot.tree.command(name="reason", description="Edit the reason on an existing case.")
+@app_commands.checks.has_permissions(moderate_members=True)
+@app_commands.describe(case_number="Case number", reason="New reason")
+async def reason(interaction: discord.Interaction, case_number: int, reason: str) -> None:
+    if not await ensure_interaction_command_access(interaction, "reason"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    if MOD_STORE.update_case_reason(interaction.guild.id, case_number, reason, _mod_actor_name(interaction)):
+        await reply_ephemeral(interaction, f"Updated reason for case `#{case_number}`.")
+        await log_interaction(interaction, action="reason", reason=f"#{case_number}: {reason}", success=True)
+    else:
+        await reply_ephemeral(interaction, f"Case `#{case_number}` not found.")
+
+
+@bot.tree.command(name="cases", description="List recent moderation cases.")
+@app_commands.checks.has_permissions(moderate_members=True)
+@app_commands.describe(member="Filter by member", action="Filter by action", limit="How many to show")
+async def cases(
+    interaction: discord.Interaction,
+    member: discord.Member | None = None,
+    action: str | None = None,
+    limit: app_commands.Range[int, 1, 25] = 10,
+) -> None:
+    if not await ensure_interaction_command_access(interaction, "cases"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    rows = MOD_STORE.list_cases(
+        interaction.guild.id,
+        target_id=member.id if member else None,
+        action=action,
+        limit=int(limit),
+    )
+    if not rows:
+        await reply_ephemeral(interaction, "No cases found.")
+        return
+    await reply_ephemeral(interaction, "\n".join(_mod_case_summary(row) for row in rows))
+
+
+@bot.tree.command(name="history", description="Show a member's full moderation history.")
+@app_commands.checks.has_permissions(moderate_members=True)
+@app_commands.describe(member="Member to inspect")
+async def history(interaction: discord.Interaction, member: discord.Member) -> None:
+    if not await ensure_interaction_command_access(interaction, "history"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    guild_id = interaction.guild.id
+    case_rows = MOD_STORE.list_cases(guild_id, target_id=member.id, limit=10)
+    warning_rows = MOD_STORE.list_warnings(guild_id, member.id, limit=10)
+    note_rows = MOD_STORE.list_notes(guild_id, member.id, limit=10)
+    lines = [f"**History for {member.mention}**"]
+    lines.append(f"Cases: {len(case_rows)} | Warnings: {len(warning_rows)} | Notes: {len(note_rows)}")
+    if case_rows:
+        lines.append("\n**Recent cases**")
+        lines.extend(_mod_case_summary(row) for row in case_rows)
+    if warning_rows:
+        lines.append("\n**Recent warnings**")
+        lines.extend(f"`#{row['id']}` {row['created_at']} — {row['reason']}" for row in warning_rows)
+    if note_rows:
+        lines.append("\n**Notes**")
+        lines.extend(f"`#{row['id']}` {row['created_at']} — {row['note']}" for row in note_rows)
+    await reply_ephemeral(interaction, "\n".join(lines)[:1900])
+
+
+@bot.tree.command(name="report", description="Report a member to the moderation team.")
+@app_commands.describe(member="Member to report", reason="What happened")
+async def report(interaction: discord.Interaction, member: discord.Member, reason: str) -> None:
+    if not await ensure_interaction_command_access(interaction, "report"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    if member.id == interaction.user.id:
+        await reply_ephemeral(interaction, "You cannot report yourself.")
+        return
+    report_id = MOD_STORE.create_report(
+        guild_id=interaction.guild.id,
+        reporter_id=interaction.user.id,
+        reporter_name=_mod_actor_name(interaction),
+        target_id=member.id,
+        target_name=str(member.display_name),
+        channel_id=getattr(interaction.channel, "id", None),
+        message_id=None,
+        message_excerpt="",
+        reason=reason,
+    )
+    await reply_ephemeral(interaction, f"Report `#{report_id}` submitted. Staff will review it.")
+    log_channel = await get_log_channel(bot, interaction.guild.id)
+    if log_channel is not None:
+        try:
+            await log_channel.send(
+                f"**Report #{report_id}**\nReporter: {interaction.user.mention}\nTarget: {member.mention}\nReason: {reason}",
+                view=ReportActionView(guild_id=interaction.guild.id, report_id=report_id, target_id=member.id),
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+
+@bot.tree.command(name="appeal", description="Appeal a moderation action.")
+@app_commands.describe(case_number="Case number you are appealing", message="Why the action should be reviewed")
+async def appeal(interaction: discord.Interaction, message: str, case_number: int | None = None) -> None:
+    if not await ensure_interaction_command_access(interaction, "appeal"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    appeal_id = MOD_STORE.create_appeal(
+        guild_id=interaction.guild.id,
+        user_id=interaction.user.id,
+        user_name=_mod_actor_name(interaction),
+        case_number=case_number,
+        message=message,
+    )
+    await reply_ephemeral(interaction, f"Appeal `#{appeal_id}` submitted.")
+    log_channel = await get_log_channel(bot, interaction.guild.id)
+    if log_channel is not None:
+        try:
+            await log_channel.send(
+                f"**Appeal #{appeal_id}**\nUser: {interaction.user.mention}\nCase: {case_number or 'n/a'}\nMessage: {message}"
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+
+@bot.tree.command(name="reports", description="List open reports.")
+@app_commands.checks.has_permissions(moderate_members=True)
+async def reports(interaction: discord.Interaction) -> None:
+    if not await ensure_interaction_command_access(interaction, "reports"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    rows = MOD_STORE.list_reports(interaction.guild.id)
+    if not rows:
+        await reply_ephemeral(interaction, "No open reports.")
+        return
+    lines = [f"`#{row['id']}` {row['created_at']} — {row['target_name']} — {row['reason']}" for row in rows[:20]]
+    await reply_ephemeral(interaction, "Open reports:\n" + "\n".join(lines))
+
+
+@bot.tree.command(name="appeals", description="List open appeals.")
+@app_commands.checks.has_permissions(moderate_members=True)
+async def appeals(interaction: discord.Interaction) -> None:
+    if not await ensure_interaction_command_access(interaction, "appeals"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    rows = MOD_STORE.list_appeals(interaction.guild.id)
+    if not rows:
+        await reply_ephemeral(interaction, "No open appeals.")
+        return
+    lines = [f"`#{row['id']}` {row['created_at']} — {row['user_name']} — case {row['case_number'] or 'n/a'}" for row in rows[:20]]
+    await reply_ephemeral(interaction, "Open appeals:\n" + "\n".join(lines))
+
+
+@bot.tree.command(name="resolveappeal", description="Resolve an appeal.")
+@app_commands.checks.has_permissions(moderate_members=True)
+@app_commands.describe(appeal_id="Appeal ID", response="Response to the user", accepted="Accept the appeal")
+async def resolveappeal(
+    interaction: discord.Interaction,
+    appeal_id: int,
+    response: str,
+    accepted: bool = False,
+) -> None:
+    if not await ensure_interaction_command_access(interaction, "resolveappeal"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    status = "accepted" if accepted else "denied"
+    if MOD_STORE.resolve_appeal(interaction.guild.id, appeal_id, actor=_mod_actor_name(interaction), response=response, status=status):
+        await reply_ephemeral(interaction, f"Appeal `#{appeal_id}` marked {status}.")
+        await log_interaction(interaction, action="resolveappeal", reason=f"#{appeal_id}: {status}", success=True)
+    else:
+        await reply_ephemeral(interaction, f"Appeal `#{appeal_id}` not found.")
+
+
+@bot.tree.command(name="automod", description="Configure automod for this server.")
+@app_commands.checks.has_permissions(manage_guild=True)
+@app_commands.describe(
+    enabled="Enable or disable automod",
+    spam="Enable anti-spam",
+    invites="Block Discord invites",
+    links="Block non-allowlisted links",
+    attachments="Block dangerous attachments",
+    mentions="Maximum mentions per message",
+    raid="Enable raid protection",
+    quarantine_role="Role applied to suspicious new accounts",
+)
+async def automod(
+    interaction: discord.Interaction,
+    enabled: bool | None = None,
+    spam: bool | None = None,
+    invites: bool | None = None,
+    links: bool | None = None,
+    attachments: bool | None = None,
+    mentions: app_commands.Range[int, 0, 50] | None = None,
+    raid: bool | None = None,
+    quarantine_role: discord.Role | None = None,
+) -> None:
+    if not await ensure_interaction_command_access(interaction, "automod"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    updates: dict[str, object] = {}
+    if enabled is not None:
+        updates["enabled"] = 1 if enabled else 0
+    if spam is not None:
+        updates["spam_enabled"] = 1 if spam else 0
+    if invites is not None:
+        updates["invite_block"] = 1 if invites else 0
+    if links is not None:
+        updates["link_block"] = 1 if links else 0
+    if attachments is not None:
+        updates["attachment_block"] = 1 if attachments else 0
+    if mentions is not None:
+        updates["mention_limit"] = int(mentions)
+    if raid is not None:
+        updates["raid_enabled"] = 1 if raid else 0
+    if quarantine_role is not None:
+        updates["quarantine_role_id"] = quarantine_role.id
+    settings = (
+        MOD_STORE.save_automod_settings(interaction.guild.id, **updates)
+        if updates
+        else MOD_STORE.get_automod_settings(interaction.guild.id)
+    )
+    await reply_ephemeral(
+        interaction,
+        "**Automod settings**\n"
+        f"Enabled: {bool(settings['enabled'])}\n"
+        f"Anti-spam: {bool(settings['spam_enabled'])}\n"
+        f"Invites blocked: {bool(settings['invite_block'])}\n"
+        f"Links blocked: {bool(settings['link_block'])}\n"
+        f"Attachments blocked: {bool(settings['attachment_block'])}\n"
+        f"Mention limit: {settings['mention_limit']}\n"
+        f"Raid protection: {bool(settings['raid_enabled'])}\n"
+        f"Quarantine role: {settings.get('quarantine_role_id') or 'not set'}",
+    )
+    if updates:
+        await log_interaction(interaction, action="automod", reason=str(updates), success=True)
+
+
+@bot.tree.command(name="lockdown", description="Toggle server-wide lockdown.")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(active="Enable or disable lockdown", minutes="Auto-expire after N minutes", reason="Reason")
+async def lockdown(
+    interaction: discord.Interaction,
+    active: bool,
+    minutes: app_commands.Range[int, 1, 1440] | None = 60,
+    reason: str = "No reason provided",
+) -> None:
+    if not await ensure_interaction_command_access(interaction, "lockdown"):
+        return
+    if interaction.guild is None:
+        await reply_ephemeral(interaction, "This command can only be used in a server.")
+        return
+    MOD_STORE.set_lockdown(
+        interaction.guild.id,
+        active=active,
+        reason=reason,
+        actor=_mod_actor_name(interaction),
+        minutes=int(minutes) if active and minutes else None,
+    )
+    state = "enabled" if active else "disabled"
+    await reply_ephemeral(interaction, f"Lockdown {state}.")
+    await log_interaction(interaction, action="lockdown", reason=f"{state}: {reason}", success=True)
+
+
+@bot.tree.command(name="sharedban", description="Manage the cross-server shared ban list.")
+@app_commands.checks.has_permissions(ban_members=True)
+@app_commands.describe(action="add, remove, or list", user_id="User ID for add/remove", reason="Reason for add")
+async def sharedban(
+    interaction: discord.Interaction,
+    action: str,
+    user_id: str | None = None,
+    reason: str = "No reason provided",
+) -> None:
+    if not await ensure_interaction_command_access(interaction, "sharedban"):
+        return
+    normalized = str(action or "").strip().lower()
+    if normalized == "list":
+        rows = MOD_STORE.list_shared_bans()
+        if not rows:
+            await reply_ephemeral(interaction, "The shared ban list is empty.")
+            return
+        lines = [f"`{row['user_id']}` — {row['reason']} (by {row['added_by']})" for row in rows[:30]]
+        await reply_ephemeral(interaction, "Shared bans:\n" + "\n".join(lines))
+        return
+    target_id = parse_user_id_input(user_id or "")
+    if target_id is None:
+        await reply_ephemeral(interaction, "Provide a valid user ID.")
+        return
+    if normalized == "add":
+        MOD_STORE.add_shared_ban(target_id, reason=reason, added_by=_mod_actor_name(interaction))
+        await reply_ephemeral(interaction, f"Added `{target_id}` to the shared ban list.")
+        await log_interaction(interaction, action="sharedban", reason=f"add {target_id}: {reason}", success=True)
+    elif normalized == "remove":
+        removed = MOD_STORE.remove_shared_ban(target_id)
+        await reply_ephemeral(interaction, f"{'Removed' if removed else 'Not found:'} `{target_id}`.")
+    else:
+        await reply_ephemeral(interaction, "Action must be add, remove, or list.")
 
 
 @bot.tree.command(name="addrole", description="Add a role to a member.")
