@@ -42,7 +42,7 @@ jobs:
             --report-path gitleaks.sarif
           scan_exit_code=$?
           if [ ! -f gitleaks.sarif ]; then
-            echo '{"version":"2.1.0","runs":[]}' > gitleaks.sarif
+            echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"trivy","informationUri":"https://github.com/aquasecurity/trivy","rules":[]}},"results":[]}]}' > gitleaks.sarif
           fi
           echo "scan_exit_code=${scan_exit_code}" >> "$GITHUB_OUTPUT"
           exit 0
@@ -73,7 +73,9 @@ jobs:
         id: trivy_fs
         run: |
           set +e
-          docker run --rm \
+          scan_exit_code=0
+          for attempt in 1 2; do
+            docker run --rm \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             aquasec/trivy:0.56.1 \
@@ -81,15 +83,24 @@ jobs:
             --severity HIGH,CRITICAL \
             --scanners vuln,misconfig,secret \
             --ignore-unfixed \
-            --db-repository public.ecr.aws/aquasecurity/trivy-db:2 \
-            --java-db-repository public.ecr.aws/aquasecurity/trivy-java-db:1 \
             --format sarif \
             --output trivy-fs.sarif \
             --exit-code 1 \
             .
-          scan_exit_code=$?
-          if [ ! -f trivy-fs.sarif ]; then
-            echo '{"version":"2.1.0","runs":[]}' > trivy-fs.sarif
+            scan_exit_code=$?
+            if [ -f trivy-fs.sarif ]; then
+              break
+            fi
+            echo "::warning::trivy-fs: no report produced (attempt ${attempt}); retrying after a pause."
+            sleep 15
+          done
+          if [ -f trivy-fs.sarif ]; then
+            echo "scan_ran=true" >> "$GITHUB_OUTPUT"
+          else
+            # A valid empty report, so the upload step succeeds, and scan_ran=false so
+            # the job still fails: a scan that never ran must not look green.
+            echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"trivy","informationUri":"https://github.com/aquasecurity/trivy","rules":[]}},"results":[]}]}' > trivy-fs.sarif
+            echo "scan_ran=false" >> "$GITHUB_OUTPUT"
           fi
           echo "scan_exit_code=${scan_exit_code}" >> "$GITHUB_OUTPUT"
           exit 0
@@ -99,6 +110,12 @@ jobs:
         uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: trivy-fs.sarif
+
+      - name: Fail when the scan could not run
+        if: steps.trivy_fs.outputs.scan_ran != 'true'
+        run: |
+          echo "::error::Trivy produced no report, so this scan did not run. Check the database download above."
+          exit 1
 
       - name: Fail on vulnerabilities
         if: steps.trivy_fs.outputs.scan_exit_code != '0' && github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -132,7 +149,9 @@ jobs:
         id: trivy_image
         run: |
           set +e
-          docker run --rm \
+          scan_exit_code=0
+          for attempt in 1 2; do
+            docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -140,15 +159,24 @@ jobs:
             image \
             --severity HIGH,CRITICAL \
             --ignore-unfixed \
-            --db-repository public.ecr.aws/aquasecurity/trivy-db:2 \
-            --java-db-repository public.ecr.aws/aquasecurity/trivy-java-db:1 \
             --format sarif \
             --output trivy-image.sarif \
             --exit-code 1 \
             wickedyoda-little-helper:scan
-          scan_exit_code=$?
-          if [ ! -f trivy-image.sarif ]; then
-            echo '{"version":"2.1.0","runs":[]}' > trivy-image.sarif
+            scan_exit_code=$?
+            if [ -f trivy-image.sarif ]; then
+              break
+            fi
+            echo "::warning::trivy-image: no report produced (attempt ${attempt}); retrying after a pause."
+            sleep 15
+          done
+          if [ -f trivy-image.sarif ]; then
+            echo "scan_ran=true" >> "$GITHUB_OUTPUT"
+          else
+            # A valid empty report, so the upload step succeeds, and scan_ran=false so
+            # the job still fails: a scan that never ran must not look green.
+            echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"trivy","informationUri":"https://github.com/aquasecurity/trivy","rules":[]}},"results":[]}]}' > trivy-image.sarif
+            echo "scan_ran=false" >> "$GITHUB_OUTPUT"
           fi
           echo "scan_exit_code=${scan_exit_code}" >> "$GITHUB_OUTPUT"
           exit 0
@@ -158,6 +186,12 @@ jobs:
         uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: trivy-image.sarif
+
+      - name: Fail when the scan could not run
+        if: steps.trivy_image.outputs.scan_ran != 'true'
+        run: |
+          echo "::error::Trivy produced no report, so this scan did not run. Check the database download above."
+          exit 1
 
       - name: Fail on vulnerabilities
         if: steps.trivy_image.outputs.scan_exit_code != '0' && github.event_name == 'push' && github.ref == 'refs/heads/main'
