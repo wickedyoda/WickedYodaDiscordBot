@@ -11,3 +11,11 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    # Every github/codeql-action step in a workflow must run the same version;
+    # a single-step bump fails with "Loaded a configuration file for version X,
+    # but running version Y". Group them so Dependabot updates init, analyze and
+    # upload-sarif together.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
