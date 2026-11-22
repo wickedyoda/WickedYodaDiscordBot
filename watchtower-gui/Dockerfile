@@ -8,8 +8,7 @@ WORKDIR /app
 # Install docker CLI for container management
 RUN apt-get update && \
     apt-get install -y --no-install-recommends docker.io cron && \
-    apt-get install -y --no-install-recommends --only-upgrade \
-        apt libapt-pkg7.0 libpcre2-8-0 libssl3t64 openssl openssl-provider-legacy zlib1g && \
+    apt-get upgrade -y && \
     rm -rf /var/lib/apt/lists/*
 
 COPY watchtower-gui/requirements.txt .

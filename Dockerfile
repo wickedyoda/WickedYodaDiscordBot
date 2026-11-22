@@ -6,9 +6,7 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
     && printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: trixie trixie-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.pgp\n' > /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends gosu git \
-    && apt-get install -y --no-install-recommends --only-upgrade \
-         libssl3t64 openssl openssl-provider-legacy perl-base libsqlite3-0 gzip libacl1 libncursesw6 libtinfo6 libpcre2-8-0 \
-         zlib1g apt libapt-pkg7.0 \
+    && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/* \
     # pip ships vendor.txt listing setuptools==70.3.0 although it vendors no
     # setuptools copy; scanners (Trivy) read it as an installed package and
